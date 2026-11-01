@@ -1,0 +1,29 @@
+[Desktop Entry]
+Version=1.0
+# No DBusActivatable line on purpose: only the desktop installer knows the
+# absolute binary path, and it sets the key to true exactly when it also writes
+# the matching D-Bus service file (dist/njuggle/dbus.service.default). A true
+# with no service file makes the launcher refuse to start the app.
+Name=@NAME@
+Type=Application
+Comment=The waterhorse terminal emulator
+TryExec=@GHOSTTY@
+Exec=@GHOSTTY@ --gtk-single-instance=true
+Icon=@APPID@
+Categories=System;TerminalEmulator;
+Keywords=terminal;tty;pty;
+StartupNotify=true
+StartupWMClass=@APPID@
+Terminal=false
+Actions=new-window;
+X-GNOME-UsesNotifications=true
+X-TerminalArgExec=-e
+X-TerminalArgTitle=--title=
+X-TerminalArgAppId=--class=
+X-TerminalArgDir=--working-directory=
+X-TerminalArgHold=--wait-after-command
+X-KDE-Shortcuts=Ctrl+Alt+T
+
+[Desktop Action new-window]
+Name=New Window
+Exec=@GHOSTTY@ --gtk-single-instance=true

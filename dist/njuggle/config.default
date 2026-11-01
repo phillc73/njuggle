@@ -1,0 +1,80 @@
+# Njuggle default configuration.
+#
+# This is the configuration Njuggle ships. Two routes deliver it, both to
+# $XDG_CONFIG_HOME/njuggle/config (default ~/.config/njuggle/config):
+#
+#   - first run, when no config file exists: Njuggle writes it there;
+#   - `zig build install`, through the install step.
+#
+# Either way it is written once. Njuggle never overwrites a config you have
+# edited: everything below is yours to change or delete.
+#
+# Njuggle reads this file and this file only. It does not read Ghostty's
+# configuration (~/.config/ghostty/...); copy any settings you want to keep
+# across by hand.
+
+window-show-tab-bar = never
+#
+# Every option below is NJUGGLE'S OWN - none of them exists in Ghostty. With
+# none of them set, Njuggle behaves as upstream Ghostty does.
+
+# The vertical tab sidebar: none | left | right.
+#
+# Njuggle ships this one on. The sidebar is the reason Njuggle exists. Set it
+# to `none` for upstream Ghostty behaviour, Njuggle's extra options below
+# included. Does not exist in Ghostty.
+gtk-sidebar-tabs = left
+
+# --- Njuggle-only options: OFF unless you add them ----------------------
+#
+# These switch ON by PRESENCE: uncomment the line (or add it) to turn the
+# option on, delete the line to get stock behaviour back.
+
+# 1px border around the active tab's row in the sidebar.
+# gtk-sidebar-active-tab-border = #ff5500
+#
+# 1px border around the focused pane in a split tab. Follows focus.
+# active-pane-border = #ff5500
+#
+# Konsole-style dimming of unfocused panes. Strength follows
+# unfocused-split-opacity (Njuggle default 0.5 - uncomment the line
+# below and adjust to taste; upstream default is 0.7).
+# inactive-pane-dim = true
+
+# --- Njuggle-only options: ON unless you turn them off ------------------
+#
+# These are the opposite case: they are already on with no line here at all,
+# and you turn them OFF by setting them to false or 0. Delete the line again
+# to get the default back.
+
+# The starting width of the sidebar in pixels. 0 (the default, and what you
+# get with no line here) means the sidebar's own width, a quarter of the
+# window. A non-zero value is the starting width in every window; dragging
+# the sidebar's inner edge, or the `sidebar_resize` keybinding, changes the
+# width for the current session only. Clamped to 150px..half the window, and
+# has no effect in the collapsed (overlay) sidebar or with
+# gtk-sidebar-tabs = none.
+# gtk-sidebar-width = 0
+
+# The per-tab status icon in the sidebar. true (the default, and what you get
+# with no line here) shows it on every row: grey idle, green while a command
+# runs, red when a tab needs attention (a command finished while you were in
+# another tab and ran longer than gtk-sidebar-status-after, or the tab rang
+# the bell). Set it to false to hide the icon. A split tab shows the strongest
+# state of any of its panes.
+# gtk-sidebar-status-icon = true
+
+# How long a command must run (in seconds) for its finish to mark the tab as
+# needing attention. Applies only when the tab is not focused. 5s by default.
+# Set it to 0 to mark every unfocused finish. Requires
+# gtk-sidebar-status-icon.
+# gtk-sidebar-status-after = 5s
+
+# --- Look and feel ------------------------------------------------------
+#
+# Copies of Ghostty options, shown commented out so you can see the syntax.
+# Njuggle changes no default among these.
+#
+# font-family = JetBrains Mono
+# font-size = 12
+# theme = catppuccin-mocha

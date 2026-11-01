@@ -1,0 +1,100 @@
+# This is the configuration file for Njuggle.
+#
+# Njuggle created this file at the following path because it found no
+# config file there on first run:
+#
+#   {[path]s}
+#
+# Its body is the configuration Njuggle ships (config.default). It sets
+# only Njuggle's own options; every Ghostty option keeps its built-in
+# default. Delete a line, or comment it out, to get stock behaviour back.
+#
+# Njuggle reads this file and this file only. It does not read Ghostty's
+# configuration (~/.config/ghostty/...).
+#
+# Run `njuggle +show-config --default --docs` to view every available
+# option and its default value. Reload this file from the menu or with
+# Control + Shift + comma; some options need a new window or a restart.
+
+# Config syntax crash course
+# ==========================
+# # The config file consists of simple key-value pairs,
+# # separated by equals signs.
+# font-family = Iosevka
+# window-padding-x = 2
+#
+# # Spacing around the equals sign does not matter.
+# # All of these are identical:
+# key=value
+# key= value
+# key =value
+# key = value
+#
+# # Any line beginning with a # is a comment. It's not possible to put
+# # a comment after a config option, since it would be interpreted as a
+# # part of the value. For example, this will have a value of "#123abc":
+# background = #123abc
+#
+# # Empty values are used to reset config keys to default.
+# key =
+
+# The vertical tab sidebar: none | left | right.
+#
+# Njuggle ships this one on. The sidebar is the reason Njuggle exists. Set it
+# to `none` for upstream Ghostty behaviour, Njuggle's extra options below
+# included. Does not exist in Ghostty.
+gtk-sidebar-tabs = left
+
+# --- Njuggle-only options: OFF unless you add them ----------------------
+#
+# These switch ON by PRESENCE: uncomment the line (or add it) to turn the
+# option on, delete the line to get stock behaviour back.
+
+# 1px border around the active tab's row in the sidebar.
+# gtk-sidebar-active-tab-border = #ff5500
+#
+# 1px border around the focused pane in a split tab. Follows focus.
+# active-pane-border = #ff5500
+#
+# Konsole-style dimming of unfocused panes. Strength follows
+# unfocused-split-opacity (Njuggle default 0.5 - uncomment the line
+# below and adjust to taste; upstream default is 0.7).
+# inactive-pane-dim = true
+
+# --- Njuggle-only options: ON unless you turn them off ------------------
+#
+# These are the opposite case: they are already on with no line here at all,
+# and you turn them OFF by setting them to false or 0. Delete the line again
+# to get the default back.
+
+# The starting width of the sidebar in pixels. 0 (the default, and what you
+# get with no line here) means the sidebar's own width, a quarter of the
+# window. A non-zero value is the starting width in every window; dragging
+# the sidebar's inner edge, or the `sidebar_resize` keybinding, changes the
+# width for the current session only. Clamped to 150px..half the window, and
+# has no effect in the collapsed (overlay) sidebar or with
+# gtk-sidebar-tabs = none.
+# gtk-sidebar-width = 0
+
+# The per-tab status icon in the sidebar. true (the default, and what you get
+# with no line here) shows it on every row: grey idle, green while a command
+# runs, red when a tab needs attention (a command finished while you were in
+# another tab and ran longer than gtk-sidebar-status-after, or the tab rang
+# the bell). Set it to false to hide the icon. A split tab shows the strongest
+# state of any of its panes.
+# gtk-sidebar-status-icon = true
+
+# How long a command must run (in seconds) for its finish to mark the tab as
+# needing attention. Applies only when the tab is not focused. 5s by default.
+# Set it to 0 to mark every unfocused finish. Requires
+# gtk-sidebar-status-icon.
+# gtk-sidebar-status-after = 5s
+
+# --- Look and feel ------------------------------------------------------
+#
+# Copies of Ghostty options, shown commented out so you can see the syntax.
+# Njuggle changes no default among these.
+#
+# font-family = JetBrains Mono
+# font-size = 12
+# theme = catppuccin-mocha

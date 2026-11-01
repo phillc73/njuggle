@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=inode/directory
+Actions=RunNjuggleDir
+
+[Desktop Action RunNjuggleDir]
+Name=Open Njuggle Here
+Icon=org.mimosadev.njuggle
+Exec=njuggle +new-window --working-directory=%F
