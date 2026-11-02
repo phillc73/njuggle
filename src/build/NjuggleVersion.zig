@@ -57,7 +57,7 @@ pub fn appVersion(alloc: std.mem.Allocator, id: Identity) ![]const u8 {
 
 /// The full identity string, for `+version` and logs:
 /// `0.1.0+ghostty.1.4.0`, or with the pre-release on a non-release build
-/// `0.1.0-fix-build7-findings+ghostty.1.4.0.<commit>`.
+/// `0.1.0-beta.1+ghostty.1.4.0.<commit>`.
 ///
 /// The base is carried as build metadata after `ghostty.`, so it names
 /// itself rather than looking like a second product version.
@@ -108,16 +108,16 @@ test "describe: branch build keeps pre and commit after the base" {
     const id: Identity = .{
         .app = .{ .major = 0, .minor = 1, .patch = 0 },
         .base = "1.4.0",
-        .pre = "fix-build7-findings",
+        .pre = "beta.1",
         .build = "abc1234",
     };
     const v = try describe(alloc, id);
     defer alloc.free(v);
-    try testing.expectEqualStrings("0.1.0-fix-build7-findings+ghostty.1.4.0.abc1234", v);
+    try testing.expectEqualStrings("0.1.0-beta.1+ghostty.1.4.0.abc1234", v);
 
     const plain = try appVersion(alloc, id);
     defer alloc.free(plain);
-    try testing.expectEqualStrings("0.1.0-fix-build7-findings+abc1234", plain);
+    try testing.expectEqualStrings("0.1.0-beta.1+abc1234", plain);
 }
 
 test "describe: the base never becomes the version digits" {
@@ -209,7 +209,7 @@ test "describe: exactly one build-metadata clause" {
     const v = try describe(alloc, .{
         .app = .{ .major = 0, .minor = 1, .patch = 0 },
         .base = "1.4.0",
-        .pre = "fix-build7-findings",
+        .pre = "beta.1",
         .build = "d6497c592",
     });
     defer alloc.free(v);
@@ -227,7 +227,7 @@ test "describe: exactly one build-metadata clause" {
     const parsed = try std.SemanticVersion.parse(padded);
     try testing.expectEqual(@as(usize, 0), parsed.major);
     try testing.expectEqual(@as(usize, 1), parsed.minor);
-    try testing.expectEqualStrings("fix-build7-findings", parsed.pre.?);
+    try testing.expectEqualStrings("beta.1", parsed.pre.?);
     try testing.expect(std.mem.indexOf(u8, parsed.build.?, "ghostty.1.4.0") != null);
 }
 
