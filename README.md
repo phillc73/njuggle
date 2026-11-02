@@ -19,6 +19,8 @@ The minor enhancements:
 - A vertical tab sidebar with live titles and working directory.
 - Tab colours, and tab renaming.
 - Automatic tab grouping keyed by repository.
+- A per-tab status icon: green while a command runs, red when one
+  finishes needing attention.
 - A border on the active tab.
 - A border on the active pane.
 - Dimming of inactive panes.
@@ -103,11 +105,18 @@ with no line in your file at all.
 gtk-sidebar-width = 0
 ```
 
-`0`, the default, means the sidebar's own width, a quarter of the
-window. A non-zero value is the starting width in every window, clamped
-to 150px and to half the window. Dragging the sidebar's inner edge, or
-the `sidebar_resize` keybinding, changes the width for the current
-session only.
+The default width is a quarter of the window's width. Set a specific
+starting width in pixels:
+
+```
+gtk-sidebar-width = 200
+```
+
+A non-zero value is the starting width in every new window, clamped
+to at least 150px and at most half the window. Dragging the sidebar's
+inner edge, or the `sidebar_resize` keybinding, changes the width for
+the current session only; the value in this file is the starting
+point.
 
 `gtk-sidebar-status-icon` shows the per-tab status icon described under
 [Status icons](#status-icons) above:
@@ -154,7 +163,7 @@ libgtk4-layer-shell; gettext; pkg-config.
 
 Njuggle uses the GPU renderer (OpenGL 4.3+ via EGL), the same
 requirement as Ghostty 1.4. On machines without a usable GPU or EGL
-path, see [Monstar](https://github.com/rockorager/monstar), a
+path, try [Monstar](https://github.com/rockorager/monstar), a
 CPU-rendered Wayland terminal built on libghostty.
 
 ```
@@ -184,15 +193,15 @@ config is never overwritten. Copying `zig-out/bin/njuggle` into
 
 The first release is built from source. CI-built binaries (a Linux
 tarball, possibly Flatpak) are planned if there is interest. There is
-no macOS build of the sidebar: the sidebar is GTK-only, so macOS users
-need the macOS-only sidebar forks.
+no macOS build: the sidebar is GTK-only and targets Linux and
+Unix-like systems.
 
 ## Parity with Ghostty
 
-`gtk-sidebar-tabs = none` makes Njuggle behave exactly as upstream
-Ghostty. The automated check (`scripts/check-none-parity.sh`) guards
-this. Njuggle-only features (borders, dimming) do not exist in `none`
-mode.
+`gtk-sidebar-tabs = none` makes Njuggle's tabbed behaviour match
+upstream Ghostty. The automated check (`scripts/check-none-parity.sh`)
+guards this. Njuggle-only options (borders, dimming) can still be set
+in `none` mode; with none of them set, `none` mode is Ghostty.
 
 ## Lineage and attribution
 
@@ -202,14 +211,14 @@ Based on Ghostty 1.4.0.
   https://github.com/ghostty-org/ghostty, MIT, copyright preserved.
 - The archived fork this continuation came from:
   https://github.com/geremyturcotte/ghostty-linux-vertical-tabs, MIT,
-  archived October 2026; the vertical-tabs work is theirs.
+  archived October 2026; the original vertical-tabs work is theirs.
 - Njuggle: maintained rebase of that sidebar series onto current
   Ghostty releases.
 
-Njuggle versions Njuggle. Its own version is 0.1.0; the Ghostty release
-above is the base it is rebased on, and moves with each rebase without
-moving Njuggle's version. The build reports both: `+version` prints
-`0.1.0+ghostty.1.4.0`.
+Njuggle has its own version, independent of the Ghostty release it is
+based on. This release is Njuggle 0.1.0, based on Ghostty 1.4.0; the
+Ghostty base moves with each rebase without moving Njuggle's version.
+The build reports both: `+version` prints `0.1.0+ghostty.1.4.0`.
 
 ## Known limits
 
@@ -232,5 +241,5 @@ licensed, copyright preserved, and its licence text is in
 ## AI assistance
 
 This project, including the reproduction, the rebase and this text, was
-written with the assistance of a large language model (a multi-session
-agent workflow) and reviewed by its maintainer.
+written with the assistance of a large language model and reviewed by
+its maintainer.
