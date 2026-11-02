@@ -956,7 +956,7 @@ pub const Surface = extern struct {
         return @intFromBool(search_active == 0 and focused == 0 and is_split != 0);
     }
 
-    /// R4: draw the active-pane border only when the user configured a
+    /// Draw the active-pane border only when the user configured a
     /// colour AND this surface is the focused pane of a split tab. Reading
     /// the config here (rather than baking a colour in) keeps the key purely
     /// presentational: the CSS rule in application.zig owns the colour and

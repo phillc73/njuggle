@@ -133,10 +133,9 @@ const locales = [_][]const u8{
 You should then be able to run `zig build run` and see your translations in
 action! See the ["Viewing translations" section](#viewing-translations) below.
 
-Before opening a pull request with the new translation file, you should also
-update the `CODEOWNERS` file. This is described in more detail in the
-["Localization teams" section](#localization-teams)—don't forget to read that
-section before submitting a pull request!
+Before opening a pull request with the new translation file, read the
+["Localization teams" section](#localization-teams)-it explains how translations
+are reviewed and what a pull request needs before it is merged.
 
 ## Viewing translations
 
@@ -186,31 +185,8 @@ are adding translations for languages that have few speakers, you might wish to
 ask a friend of yours who also speaks that language whether they'd be willing to
 help with Ghostty translations.
 
-### `CODEOWNERS`
-
-Localization teams are represented as teams in the Ghostty GitHub organization.
-GitHub reads a `CODEOWNERS` file, which maps files to teams, to identify
-relevant maintainers. When **introducing support for a language**, you should
-add the `.po` file to `CODEOWNERS`.
-
-To do this, find the `# Localization` section near the bottom of the file, and
-add a line like so:
-
-```diff
- # Localization
- /po/README_TRANSLATORS.md @ghostty-org/localization
- /po/com.mitchellh.ghostty.pot @ghostty-org/localization
- /po/zh_CN.po @ghostty-org/zh_CN
-+/po/X.po @ghostty-org/yy_ZZ
-```
-
-`X.po` here is the name of the translation file you created. Unlike the
-translation file's name, localization team names **always include a language and
-country code**; `yy` here is the _language code_, and `ZZ` is the _country
-code_.
-
-When adding a new entry, try to keep the list in **alphabetical order** if
-possible.
+Opening a pull request with the new `.po` file is all that is needed to propose a
+new locale.
 
 ## Style guide
 

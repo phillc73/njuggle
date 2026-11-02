@@ -26,10 +26,11 @@
 #      launch, because the breakpoint was declared in the template rather than
 #      installed only when the sidebar is on.
 #
-# R4 (active-pane-border) and R5 (inactive-pane-dim) are Njuggle-only and have
-# no effect under `none`: they are read on paths `none` never reaches. That is
-# what keeps this gate honest - it never compares a Njuggle-only feature
-# against upstream.
+# `active-pane-border` and `inactive-pane-dim` are Njuggle-only and have no
+# effect under `none`: they are read on paths `none` never reaches. The gate
+# diffs the `none` output against upstream, so it never compares a
+# Njuggle-only feature against itself - a behaviour that only exists on a
+# sidebar path cannot be masked by it.
 #
 # Usage:  sh scripts/check-none-parity.sh [path-to-upstream-ghostty]
 set -eu

@@ -1039,7 +1039,7 @@ pub const Application = extern struct {
 
         const unfocused_fill: CoreConfig.Color = config.@"unfocused-split-fill" orelse config.background;
 
-        // R5: `inactive-pane-dim` is a hard switch over the same overlay
+        // `inactive-pane-dim` is a hard switch over the same overlay
         // upstream uses for unfocused splits. Off is expressed as opacity
         // 1.0, which draws an invisible rectangle: the revealer still
         // exists but costs one no-op paint on unfocused panes only, and the
@@ -1062,7 +1062,7 @@ pub const Application = extern struct {
             unfocused_fill.b,
         });
 
-        // R3: the sidebar's active row gets a 1px border only when the user
+        // The sidebar's active row gets a 1px border only when the user
         // asked for one. Presence of the key is the switch, and the rule is
         // emitted into the same runtime provider as everything else, so a
         // config reload re-emits it and no widget code runs per frame.
@@ -1081,7 +1081,7 @@ pub const Application = extern struct {
             });
         }
 
-        // R4: the focused pane's border. The revealer in surface.blp decides
+        // The focused pane's border. The revealer in surface.blp decides
         // visibility (focused AND split AND key present); this only supplies
         // the colour. A border colour beats the dim for the focused pane by
         // construction: the two overlays are complementary - the dim covers

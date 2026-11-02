@@ -266,7 +266,7 @@ fn addLinuxAppResources(
     // Background:
     // https://developer.gnome.org/documentation/guidelines/maintainer/integrating.html
 
-    // R6: identity comes from one place. `bundle_id` is the same string the
+    // Identity comes from one place. `bundle_id` is the same string the
     // runtime uses for the GTK application id (build/info.zig), so the
     // desktop entry, the DBus name and the WM_CLASS agree and the app cannot
     // group with an installed Ghostty.
@@ -403,7 +403,7 @@ fn addLinuxAppResources(
         "share/njuggle/dbus.service.default",
     ).step);
 
-    // R6: Njuggle's own artwork, at the hicolor sizes the desktop reads.
+    // Njuggle's own artwork, at the hicolor sizes the desktop reads.
     // 32/64/128 are generated from the 512 master rather than shipped as
     // three hand-made files, so there is one source of truth for the mark.
     const hicolor = .{
@@ -446,7 +446,7 @@ fn addLinuxAppResources(
     for (steps.items) |dep| install_desktop.step.dependOn(dep);
     try steps.append(b.allocator, &install_desktop.step);
 
-    // R2: ship a default config, installed only when the user has none.
+    // Ship a default config, installed only when the user has none.
     // A plain install-file would overwrite the user's edited config on
     // every `zig build install`, so this is a run step with a test -f
     // guard. The template is written to the install prefix so the file the
