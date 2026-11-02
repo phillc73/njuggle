@@ -99,24 +99,12 @@ multi-pane tabs only, and the focused pane is never dimmed.
 The second group is **on unless you turn it off**: these already work
 with no line in your file at all.
 
-`gtk-sidebar-width` is the starting width of the sidebar in pixels:
-
-```
-gtk-sidebar-width = 0
-```
-
-The default width is a quarter of the window's width. Set a specific
-starting width in pixels:
-
-```
-gtk-sidebar-width = 200
-```
-
-A non-zero value is the starting width in every new window, clamped
-to at least 150px and at most half the window. Dragging the sidebar's
-inner edge, or the `sidebar_resize` keybinding, changes the width for
-the current session only; the value in this file is the starting
-point.
+`gtk-sidebar-width` sets a fixed sidebar width in pixels. It is
+accepted in the config today but **not implemented yet**: the sidebar
+width is currently set automatically by the toolkit - a fraction of
+the window's width, growing with the window only as far as its
+content needs. A fixed-width option, drag-resize on the sidebar's
+inner edge, and width persistence are planned.
 
 `gtk-sidebar-status-icon` shows the per-tab status icon described under
 [Status icons](#status-icons) above:
