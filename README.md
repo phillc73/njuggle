@@ -1,9 +1,5 @@
 <p align="center"><img src="hero.png" alt="Njuggle" width="400"></p>
 
-# Njuggle
-
-Ghostty with vertical tabs.
-
 ## What is Njuggle?
 
 Njuggle is a fork of Ghostty with vertical tabs, and that's about it.
