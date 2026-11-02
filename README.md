@@ -13,11 +13,11 @@ team.
 The minor enhancements:
 
 - A vertical tab sidebar with live titles and working directory.
-- Tab colours, and tab renaming.
-- Automatic tab grouping keyed by repository.
-- A per-tab status icon: green while a command runs, red when one
-  finishes needing attention.
-- A border on the active tab.
+- Automatic tab grouping: tabs in the same git repository group
+  together (tabs outside a repository group by their folder).
+- Per-tab status icons: green while a command runs, red when a
+  command finishes needing attention.
+- Tab renaming.
 - A border on the active pane.
 - Dimming of inactive panes.
 - Its own configuration file.
