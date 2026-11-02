@@ -137,6 +137,9 @@ integration, keybindings, themes, all other settings. For additional
 help and information, see the Ghostty documentation at
 https://ghostty.org/docs
 
+One inherited Ghostty option ships pinned in the default config:
+`window-show-tab-bar = never` - the sidebar replaces the top tab bar.
+
 One consequence of the separate config file: your font and theme
 choices live in the Ghostty config, so copy them across to
 `~/.config/njuggle/config` when you first set it up. That is the copy
