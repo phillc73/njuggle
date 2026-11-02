@@ -2,8 +2,8 @@
 
 ## What is Njuggle?
 
-Njuggle is a fork of Ghostty with vertical tabs, and that's about it.
-There are also a few other minor enhancements included, which are
+Njuggle is a fork of Ghostty with vertical tabs.
+There are also a few other enhancements included, which are
 listed below.
 
 Njuggle is regularly re-based on the latest libghostty and enjoys all
@@ -12,12 +12,13 @@ team.
 
 The minor enhancements:
 
-- A vertical tab sidebar with live titles and working directory.
+- A vertical tab sidebar with live titles and working directory displayed.
 - Automatic tab grouping: tabs in the same git repository group
   together (tabs outside a repository group by their folder).
 - Per-tab status icons: green while a command runs, red when a
   command finishes needing attention.
 - Tab renaming.
+- A border on the active tab
 - A border on the active pane.
 - Dimming of inactive panes.
 - Its own configuration file.
@@ -43,9 +44,9 @@ grey.
 
 ## Configuration: Njuggle's own settings
 
-**These options are Njuggle's own. Not one of them exists in Ghostty.**
-With none of them set, Njuggle behaves as upstream Ghostty does. The
-complete list follows.
+**These options are Njuggle's own. None of them exist in Ghostty.**
+With none of them set, Njuggle behaves largely the same as upstream Ghostty. The
+complete list is as follows.
 
 `gtk-sidebar-tabs` is the switch for the sidebar itself:
 
@@ -54,8 +55,7 @@ gtk-sidebar-tabs = left
 ```
 
 The value is `left`, `right` or `none`, and the default is `left`.
-`none` means stock Ghostty behaviour, Njuggle's options below
-included.
+`none` means stock Ghostty tab behaviour, 
 
 The rest fall into two groups. The first group is **off unless you add
 it**: the line's presence is the switch, and deleting the line returns
@@ -136,10 +136,9 @@ https://ghostty.org/docs
 One inherited Ghostty option ships pinned in the default config:
 `window-show-tab-bar = never` - the sidebar replaces the top tab bar.
 
-One consequence of the separate config file: your font and theme
-choices live in the Ghostty config, so copy them across to
-`~/.config/njuggle/config` when you first set it up. That is the copy
-described in the paragraph above.
+One consequence of the separate config file: if you're already a Ghostty user, your font and theme
+choices live in the Ghostty config. Copy them across to
+`~/.config/njuggle/config` when you first set it up. 
 
 ## Building from source
 
@@ -214,7 +213,7 @@ The build reports both: `+version` prints `0.1.0+ghostty.1.4.0`.
   optimization. It is a workaround for a Zig compile failure, it costs
   nothing at runtime, and it will be removed when a Zig release no
   longer needs it.
-- The full test suite needs a machine with more than 11 GB of RAM.
+- The full test suite needs a machine with more than 12 GB of RAM.
 
 ## License
 
