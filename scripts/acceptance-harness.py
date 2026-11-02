@@ -363,7 +363,7 @@ class Session:
         items are measured from the reference popover: header ~44px tall,
         5 items evenly spaced with the first item's center 76px from the
         popover's top and 32px between item centers -- see
-        the acceptance checklist's Task 11 note for how these were derived.
+        the reference popover measurements for how these were derived.
         Uses dismiss=False on the menu-open click: probe_click's default
         Escape-after-capture would otherwise close the menu before this
         method can click into it."""
@@ -751,7 +751,7 @@ def cmd_menu():
 
 
 def cmd_scroll_colour():
-    """Task 11: open 6 tabs, colour rows 1 (Red) and 2 (Blue) via the row
+    """Open 6 tabs, colour rows 1 (Red) and 2 (Blue) via the row
     menu, shrink the window so the 6-row list must scroll, scroll to the
     bottom and back to the top (forcing GTK to recycle rows 1-3's widgets
     for rows 4-6 and back), then re-screenshot and report PASS/FAIL by
@@ -781,18 +781,18 @@ def cmd_scroll_colour():
         time.sleep(1.0)
         g = s.win.get_geometry()
         s.ww, s.wh = g.width, g.height
-        log(f"task11: resized to reference window {s.ww}x{s.wh}")
+        log(f"scroll-colour: resized to reference window {s.ww}x{s.wh}")
 
         s.open_tabs(5)  # 6 total with the initial tab
 
         close_btn_band = _scan_close_btn_band(s)
-        log(f"task11: close-button band SCANNED at x={close_btn_band} (window {s.ww}x{s.wh})")
+        log(f"scroll-colour: close-button band SCANNED at x={close_btn_band} (window {s.ww}x{s.wh})")
         geom = s.measure_row_geometry(close_btn_x=close_btn_band)
         if geom["step_y"] is None:
             raise RuntimeError("cmd_scroll_colour: could not measure row spacing "
                                 "(fewer than 2 rows detected with 6 tabs open)")
         row1_y, step_y = geom["row1_y"], geom["step_y"]
-        log(f"task11: measured row1_y={row1_y} step_y={step_y} (not the hardcoded "
+        log(f"scroll-colour: measured row1_y={row1_y} step_y={step_y} (not the hardcoded "
             "ROW_STEP_Y=66 an earlier version used, which was wrong -- true spacing is 54px)")
 
         # colour_row()'s own hamburger-menu positive control is stale here
@@ -818,11 +818,11 @@ def cmd_scroll_colour():
         colour_row_no_hamburger_ctrl(row1_y, 4, "row1")  # Red
         colour_row_no_hamburger_ctrl(row1_y + step_y, 1, "row2")  # Blue
 
-        before_shot = os.path.join(ARTIFACT_DIR, "task11-coloured-before-scroll.png")
+        before_shot = os.path.join(ARTIFACT_DIR, "scroll-colour-before.png")
         os.makedirs(ARTIFACT_DIR, exist_ok=True)
         raw = s.win.get_image(0, 0, s.ww, s.wh, X.ZPixmap, 0xFFFFFFFF)
         Image.frombytes("RGB", (s.ww, s.wh), raw.data, "raw", "BGRX").save(before_shot)
-        log(f"task11: coloured rows 1 (red) + 2 (blue), 6 tabs total -> {before_shot}")
+        log(f"scroll-colour: coloured rows 1 (red) + 2 (blue), 6 tabs total -> {before_shot}")
 
         s.win.configure(height=300)
         s.d.sync()
@@ -849,11 +849,11 @@ def cmd_scroll_colour():
         time.sleep(0.5)
 
         g = s.win.get_geometry()
-        after_shot = os.path.join(ARTIFACT_DIR, "task11-after-scroll-recycle.png")
+        after_shot = os.path.join(ARTIFACT_DIR, "scroll-colour-after.png")
         raw = s.win.get_image(0, 0, g.width, g.height, X.ZPixmap, 0xFFFFFFFF)
         img = Image.frombytes("RGB", (g.width, g.height), raw.data, "raw", "BGRX")
         img.save(after_shot)
-        log(f"task11: scrolled to bottom and back to top (forces row-widget recycling) -> {after_shot}")
+        log(f"scroll-colour: scrolled to bottom and back to top (forces row-widget recycling) -> {after_shot}")
 
         # Finding "a red pixel somewhere" and "a blue pixel somewhere" is not
         # the criterion under test: the criterion is "colour state lives on
@@ -893,8 +893,8 @@ def cmd_scroll_colour():
         blue_ys = colour_ys(is_blueish)
         red_center = sum(red_ys) / len(red_ys) if red_ys else None
         blue_center = sum(blue_ys) / len(blue_ys) if blue_ys else None
-        log(f"task11: red pixel y-range={(min(red_ys), max(red_ys)) if red_ys else None} center={red_center}")
-        log(f"task11: blue pixel y-range={(min(blue_ys), max(blue_ys)) if blue_ys else None} center={blue_center}")
+        log(f"scroll-colour: red pixel y-range={(min(red_ys), max(red_ys)) if red_ys else None} center={red_center}")
+        log(f"scroll-colour: blue pixel y-range={(min(blue_ys), max(blue_ys)) if blue_ys else None} center={blue_center}")
 
         row1_band, row2_band = band(0), band(1)
         red_in_row1_band = red_center is not None and row1_band[0] <= red_center <= row1_band[1]
@@ -902,16 +902,16 @@ def cmd_scroll_colour():
         no_red_in_row2_band = not any(row2_band[0] <= y <= row2_band[1] for y in red_ys)
         no_blue_in_row1_band = not any(row1_band[0] <= y <= row1_band[1] for y in blue_ys)
 
-        log(f"task11: row1_band={row1_band} row2_band={row2_band} "
+        log(f"scroll-colour: row1_band={row1_band} row2_band={row2_band} "
             f"red_in_row1={red_in_row1_band} blue_in_row2={blue_in_row2_band} "
             f"no_red_in_row2={no_red_in_row2_band} no_blue_in_row1={no_blue_in_row1_band}")
 
         if red_in_row1_band and blue_in_row2_band and no_red_in_row2_band and no_blue_in_row1_band:
-            log("task11: PASS — red stayed on row 1's band and blue on row 2's band after "
+            log("scroll-colour: PASS - red stayed on row 1's band and blue on row 2's band after "
                 "scroll-induced row recycling; neither colour migrated or swapped rows")
             return 0
         else:
-            log("task11: FAIL — a colour is missing from its expected row's band, or present "
+            log("scroll-colour: FAIL - a colour is missing from its expected row's band, or present "
                 "in the other row's band (recycling put colour on the wrong row)")
             return 1
     finally:
@@ -3064,8 +3064,8 @@ def cmd_section_header():
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--hamburger", action="store_true", help="positive control only")
-    ap.add_argument("--menu", action="store_true", help="Task 9: row context menu, with positive+negative controls")
-    ap.add_argument("--scroll-colour", action="store_true", help="Task 11: 6 tabs, colour + scroll scenario")
+    ap.add_argument("--menu", action="store_true", help="Row context menu, with positive+negative controls")
+    ap.add_argument("--scroll-colour", action="store_true", help="6 tabs, colour + scroll scenario")
     ap.add_argument("--none-parity", action="store_true",
                      help="none-mode UI parity: tab bar present, no sidebar, no sidebar shortcut")
     ap.add_argument("--none-shortcut", action="store_true",
