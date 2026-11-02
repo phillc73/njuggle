@@ -2,8 +2,9 @@
 # Assert this fork's promise: with `gtk-sidebar-tabs = none`, SIDEBAR BEHAVIOUR
 # matches upstream Ghostty.
 #
-# RE-SCOPED 2026-10-30 (CR: own config + borders + dimming). The old promise -
-# "none mode is indistinguishable from upstream" - is no longer achievable and
+# The scope is sidebar behaviour plus Njuggle's own config path and borders.
+# The old promise - "none mode is indistinguishable from upstream" - is no
+# longer achievable and
 # is no longer made: Njuggle reads its own config path
 # ($XDG_CONFIG_HOME/njuggle/config, never Ghostty's) and carries its own
 # application id, by design. Neither is a sidebar behaviour, and neither can be

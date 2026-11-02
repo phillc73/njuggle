@@ -105,7 +105,7 @@ test "groupKey: finds the repository root of this very checkout" {
 }
 
 test "groupLabel: a repo root's label is its basename" {
-    const label = try groupLabel(std.testing.allocator, "/home/prokai/Github/ghostty-linux-vertical-tabs");
+    const label = try groupLabel(std.testing.allocator, "/home/<user>/Github/ghostty-linux-vertical-tabs");
     defer std.testing.allocator.free(label);
     try std.testing.expectEqualStrings("ghostty-linux-vertical-tabs", label);
 }

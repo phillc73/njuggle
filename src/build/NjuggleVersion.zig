@@ -10,7 +10,7 @@
 //! `0.1.0+ghostty.1.4.0`.
 //!
 //! See README "Lineage and attribution" and the version section of
-//! docs/projects/njuggle/njuggle-release-outcome.md.
+//! the project documentation.
 //!
 //! The product version lives in `build.zig.zon`; the base lives in
 //! `build.zig` (`ghostty_base_version`).

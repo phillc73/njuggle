@@ -4,7 +4,7 @@
 A GTK4 popover (row context menu, hamburger menu) is a SEPARATE
 override-redirect X window, not a region of the parent window. Screenshotting
 the parent window misses it every time -- that produced the "NOT MEASURABLE"
-false negative in docs/acceptance.md. This harness instead diffs the X window
+false negative in the acceptance checklist. This harness instead diffs the X window
 tree (root.query_tree, recursive) before and after a synthetic click and
 reports a popover as any override-redirect window that is either NEW or was
 REMAPPED (map_state transitioned to IsViewable). GTK reuses popover surfaces
@@ -57,9 +57,9 @@ from PIL import Image, ImageChops
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GHOSTTY_BIN = os.path.join(REPO_ROOT, "zig-out", "bin", "ghostty")
-ARTIFACT_DIR = os.path.join(REPO_ROOT, ".prokai", "tmp", "dispatch-artifacts")
+ARTIFACT_DIR = os.path.join(REPO_ROOT, ".acceptance", "tmp", "dispatch-artifacts")
 
-# Coordinates measured on the 922x722 reference window (docs/acceptance.md).
+# Coordinates measured on the 922x722 reference window (acceptance checklist).
 ROW1 = (160, 133)
 HAMBURGER = (724, 78)  # stale off the 922x722 reference window; cmd_hamburger/cmd_menu now
                         # scan the real position at runtime (_scan_hamburger_button) instead
@@ -363,7 +363,7 @@ class Session:
         items are measured from the reference popover: header ~44px tall,
         5 items evenly spaced with the first item's center 76px from the
         popover's top and 32px between item centers -- see
-        docs/acceptance.md's Task 11 note for how these were derived.
+        the acceptance checklist's Task 11 note for how these were derived.
         Uses dismiss=False on the menu-open click: probe_click's default
         Escape-after-capture would otherwise close the menu before this
         method can click into it."""
@@ -936,7 +936,7 @@ def _red_centre_in_sidebar(img, col_width=260):
 
 
 def _measured_declaration(session, mode):
-    """The five things docs/acceptance.md requires every `Measured` verdict
+    """The five things the acceptance checklist requires every `Measured` verdict
     to carry (date, binary, code sha, mode, the variables known to bite),
     gathered from THIS run instead of asserted by hand -- so a verdict
     line can never go out undated or naming a binary/commit this run
@@ -1110,7 +1110,7 @@ def cmd_drag_reorder():
             "reordering is observable to this detector")
 
         # Synthetic drag: rank 1 -> rank 3, matching the reference recipe
-        # (30 steps, 1s hold) used to independently validate this finding.
+        # (30 steps, 1s hold) used to independently validate this behaviour.
         # row_click_x (title text), not ROW1[0]: on this window ROW1[0]=160
         # sits on/near the close button (see the rank3 colouring above),
         # and a drag that starts on that button closes the tab instead of
@@ -1152,7 +1152,7 @@ def cmd_drag_reorder():
         if stayed_at_rank1 and not moved_to_rank3:
             decl = _measured_declaration(s, "drag-reorder")
             if decl is None:
-                # docs/acceptance.md's five-things rule, enforced here: an
+                # the acceptance checklist's five-things rule, enforced here: an
                 # absence verdict this run cannot NAME the binary/code sha
                 # for is not published as a defect -- see
                 # _measured_declaration's docstring for the incident this
@@ -1919,10 +1919,10 @@ TAB_BAR_HEIGHT_THRESHOLD = 20  # px; a real AdwTabBar row measures ~40px, see cm
 
 def cmd_none_parity():
     """UI-level parity check for `--gtk-sidebar-tabs=none`'s claim in
-    docs/acceptance.md: "tab bar present, no sidebar, no sidebar shortcut" --
+    the acceptance checklist: "tab bar present, no sidebar, no sidebar shortcut" --
     an interface claim that scripts/check-none-parity.sh cannot verify since
     it only diffs GTK/GLib log output, never a pixel or a widget (see that
-    finding's discussion in docs/acceptance.md). This does not replace or
+    discussion in the acceptance checklist). This does not replace or
     modify check-none-parity.sh; it measures the half of the `none` promise
     that script structurally cannot.
 

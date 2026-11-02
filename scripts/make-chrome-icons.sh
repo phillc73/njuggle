@@ -10,8 +10,8 @@
 # the install step's hicolor set and the gresource's chrome_icons.
 #
 # Why the outline: the master is white on transparent. On a dark panel that
-# reads; on a light menu it washes out to a faint grey, which is what the
-# owner's build-5 acceptance reported. A dark 1px-at-64px rim drawn under the
+# reads; on a light menu it washes out to a faint grey. A dark 1px-at-64px rim
+# drawn under the
 # silhouette fixes the light case and is invisible against dark, so one file
 # serves both backgrounds - no second asset, no theme branching.
 #

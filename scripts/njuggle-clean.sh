@@ -1,6 +1,6 @@
 #!/bin/sh
 # njuggle-clean.sh - remove everything Njuggle from the LOCAL machine,
-# verified against the build-7 install layout (binary, desktop entry, the
+# matching the install layout (binary, desktop entry, the
 # D-Bus service file, the five hicolor sizes, config and data trees), so the
 # next install is genuinely fresh. Licence: AGPLv3 (njuggle).
 # Run on the DESKTOP: sh njuggle-clean.sh

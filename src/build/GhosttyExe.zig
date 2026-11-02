@@ -33,7 +33,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
     //
     // Passed the module rather than added inline because
     // `apprt/gtk/build/info.zig` is reached through the shared `src/` tree by
-    // every artifact that imports it. Build 7's test-units gate failed to
+    // every artifact that imports it. The test-units gate failed to
     // compile for exactly this: the option lived on the exe's root module
     // only, and the config test reached `info.zig` without it.
     addAppIdOptions(b, cfg, exe.root_module);

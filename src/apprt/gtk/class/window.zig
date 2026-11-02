@@ -708,7 +708,7 @@ pub const Window = extern struct {
         // Tab-bar visibility is NOT set here. `tabsVisibleFor` is the single
         // authority and the tabs-visible property carries its answer to the
         // widget. Forcing the widget hidden from this function is exactly the
-        // defect certification finding #2 recorded: syncSidebar runs after the
+        // defect recorded earlier: syncSidebar runs after the
         // property notify loop in syncAppearance, so a setVisible here stomps
         // the configured `window-show-tab-bar = always`.
 
@@ -2566,7 +2566,7 @@ pub const Window = extern struct {
 //
 // This is the ONLY authority for tab-bar visibility. Nothing else may call
 // setVisible on the tab bar; a second writer races syncAppearance's notify
-// order and that race is what certification finding #2 was.
+// order and that race is the defect this authority prevents.
 fn tabsVisibleFor(
     style: configpkg.Config.GtkTitlebarStyle,
     show_tab_bar: configpkg.Config.WindowShowTabBar,
@@ -2608,7 +2608,7 @@ test "tabsVisibleFor: none mode is upstream verbatim" {
     }
 }
 
-test "tabsVisibleFor: sidebar + explicit always keeps the bar (finding #2)" {
+test "tabsVisibleFor: sidebar + explicit always keeps the bar" {
     const t = std.testing;
     for ([_]configpkg.Config.GtkSidebarTabs{ .left, .right }) |side| {
         try t.expect(tabsVisibleFor(.native, .always, side, false, false));

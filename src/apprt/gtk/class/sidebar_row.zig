@@ -154,7 +154,7 @@ pub const SidebarRow = extern struct {
     /// The row's subtitle: the last segment of the working directory.
     ///
     /// The full path is what `pwd` carries, and it is far too long for a
-    /// sidebar column — `~/Github/prokai-plugins` ellipsizes to noise. The
+    /// sidebar column — `~/Github/my-plugins` ellipsizes to noise. The
     /// last segment is what actually distinguishes one tab from another.
     fn closureCwd(
         _: *Self,
@@ -164,13 +164,12 @@ pub const SidebarRow = extern struct {
         const span = std.mem.span(pwd);
         if (span.len == 0) return null;
 
-        // MUST allocate. Three independent reviewers said this dupeZ leaks —
-        // that GTK copies the returned string and never frees it. It was tried
-        // their way and the binary aborted on exit with
+        // MUST allocate. GTK copies the returned string and never frees it, so
+        // returning an interior pointer into the caller's buffer hands free()
+        // an address it never allocated. Returning the plain interior pointer
+        // was tried and the binary aborted on exit with
         // `munmap_chunk(): invalid pointer`, in every mode: something DOES
-        // free this pointer, so returning an interior pointer into the
-        // caller's buffer hands free() an address it never allocated.
-        // Unanimous review lost to one run of the program.
+        // free this pointer.
         const base = std.fs.path.basename(span);
         return glib.ext.dupeZ(u8, if (base.len == 0) span else base);
     }

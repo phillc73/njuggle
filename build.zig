@@ -107,7 +107,7 @@ pub fn build(b: *std.Build) !void {
     // Template child binding check: a widget a sidebar class quotes must be
     // declared in its blueprint and bound in the class. The misbinding it
     // catches (a declared, unbound widget) compiles and runs, and renders
-    // nothing - build 4 shipped exactly that with status_image.
+    // nothing - status_image is exactly that case.
     const template_check = b.addExecutable(.{
         .name = "njuggle-template-check",
         .root_module = b.createModule(.{
@@ -129,8 +129,8 @@ pub fn build(b: *std.Build) !void {
     // Config template check: the file first run writes must be Njuggle's own
     // text, must document every Njuggle option, and must survive the single
     // `{[path]s}` format field `writeConfigTemplate` prints it through.
-    // Build 4 shipped upstream's template, so a new user's first config read
-    // "This is the configuration file for Ghostty."
+    // Upstream's template reads "This is the configuration file for Ghostty.",
+    // which is wrong for Njuggle's first-run config.
     const config_template_check = b.addExecutable(.{
         .name = "njuggle-config-template-check",
         .root_module = b.createModule(.{
@@ -496,8 +496,8 @@ pub fn build(b: *std.Build) !void {
         // for a pure linker check and wrong for a gate: a source edit that
         // leaves the binary unchanged (a comment, a test-only helper the
         // optimizer folds away) prints "cached" and runs nothing, and the
-        // run's own output never reaches the log. Build 7 shipped that:
-        // `zig build test-units` was green without executing a test.
+        // run's own output never reaches the log. The gate was green without
+        // executing a test:
         // `has_side_effects` marks the run as uncacheable, so every
         // invocation executes the binary and its counts are printed.
         {

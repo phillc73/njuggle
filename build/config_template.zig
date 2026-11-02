@@ -2,9 +2,9 @@
 //!
 //! `src/config/config-template` is embedded by `Config.writeConfigTemplate` and
 //! written to `$XDG_CONFIG_HOME/njuggle/config` whenever no config file exists,
-//! on any route (a bare `zig-out/bin/njugle` run included). Build 4 shipped
-//! upstream's template there, so the first thing a new user read was "This is
-//! the configuration file for Ghostty." Every check below is a way that file
+//! on any route (a bare `zig-out/bin/njugle` run included). Upstream's template
+//! read "This is the configuration file for Ghostty.", which is wrong for
+//! Njuggle. Every check below is a way that file
 //! has been or could be wrong, read as text: standard library only.
 //!
 //! The write itself is `std.fmt.print` over the embedded bytes with one
