@@ -55,7 +55,8 @@ gtk-sidebar-tabs = left
 ```
 
 The value is `left`, `right` or `none`, and the default is `left`.
-`none` means stock Ghostty tab behaviour, 
+`none` means stock Ghostty tab behaviour. The sidebar is toggled with
+`Ctrl+Shift+B`.
 
 The rest fall into two groups. The first group is **off unless you add
 it**: the line's presence is the switch, and deleting the line returns
