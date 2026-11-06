@@ -3931,19 +3931,27 @@ else
 /// `0` (the default) means "use the sidebar's own width", which is a quarter
 /// of the window. A non-zero value is the starting width of the sidebar in
 /// every window. Dragging the sidebar's inner edge, or the
-/// `sidebar_resize` keybinding, changes the width for the current session
-/// only: Njuggle never writes its config file, so the width you set by hand
-/// is the width you get back next launch.
+/// `sidebar_resize` keybinding, writes the width here, so the width you set
+/// by hand is the width you get back next launch.
 ///
-/// The width is clamped to a minimum of 150 pixels and to half the window:
-/// a sidebar narrower than 150 is unusable, and one wider than half the
-/// window has stopped being a sidebar.
+/// The width is clamped to a minimum of 100 pixels: a narrower sidebar is
+/// unusable. It is NOT clamped to half the window - what is recorded is what
+/// is applied, and the window's own layout limits an over-wide sidebar.
 ///
 /// Has no effect in the collapsed (overlay) sidebar shown in narrow windows,
 /// and no effect when `gtk-sidebar-tabs = none`.
 ///
 /// Njuggle-only.
 @"gtk-sidebar-width": u16 = 0,
+
+/// The window's size at its last close, as `WIDTHxHEIGHT` in pixels.
+///
+/// Njuggle writes this itself when a window closes, so the next launch opens
+/// at the size the last one was closed at. Empty (the default) means "no
+/// recorded size": the window opens at its own default.
+///
+/// Njuggle-only.
+@"window-size": ?[:0]const u8 = null,
 
 /// Show a per-tab status icon on every row of the vertical tab sidebar.
 ///

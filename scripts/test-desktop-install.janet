@@ -193,6 +193,73 @@
        (= (first (string/split "\n" e1)) "[Desktop Entry]")
        (string (first (string/split "\n" e1))))
 
+# 6a. The key's GROUP, not just its presence. `[Desktop Entry]` being the first
+#     line holds however far down the key lands, so the cell above passed an
+#     entry whose key sat after `[Desktop Action new-window]` - a member of the
+#     action group, where no launcher looks for DBusActivatable. The predicate
+#     below is the property that matters: every key belongs to the group whose
+#     header precedes it, and this key belongs to the first one.
+(defn key-group [text key]
+  (var group nil)
+  (var found nil)
+  (each line (string/split "\n" text)
+    (cond
+      (string/has-prefix? "[" line) (set group line)
+      (and (nil? found) (string/has-prefix? key line)) (set found group)
+      nil))
+  found)
+
+(check "dbus: the key sits inside [Desktop Entry], not in an action group"
+       (= (key-group e1 "DBusActivatable=") "[Desktop Entry]")
+       (string "the key landed in group " (key-group e1 "DBusActivatable=")))
+
+# 6b. The misplaced state, replayed: an entry whose key already sits in the
+#     action group. The rewrite path is the one that produced it, so the same
+#     input must come out inside [Desktop Entry] - this is the red-first case
+#     the owner's install hit on 2026-11-04 (evidence: broken-state snapshot).
+(def b6 (scenario "misplaced" false))
+(def entry6 (string b6 "/share/applications/org.example.test.desktop"))
+(def tmpl-lines (string/split "\n" (read-file entry6)))
+# Write the key immediately after the first action header: the state the
+# rewrite's old group tracking produced, verbatim.
+(var inserted false)
+(def misplaced-lines
+  (seq [line :in tmpl-lines]
+    (if (and (not inserted) (string/has-prefix? "[Desktop Action" line))
+      (do (set inserted true) (string line "\nDBusActivatable=false"))
+      line)))
+(write-file entry6 (string/join misplaced-lines "\n"))
+(check "misplaced: the fixture starts with the key in the action group"
+       (= (key-group (read-file entry6) "DBusActivatable=") "[Desktop Action new-window]")
+       "the fixture did not reproduce the broken state")
+(def rc6 (run b6 "/opt/njuggle/bin/njuggle"))
+(def e6 (installed-entry b6))
+(check "misplaced: run: exit 0" (= rc6 0) (string "rc " rc6))
+(check "misplaced: the rewrite moves the key into [Desktop Entry]"
+       (= (key-group e6 "DBusActivatable=") "[Desktop Entry]")
+       (string "the key stayed in group " (key-group e6 "DBusActivatable=")))
+(check "misplaced: the rewrite keeps one action group"
+       (= 1 (length (filter (fn [l] (string/has-prefix? "[Desktop Action" l))
+                            (string/split "\n" e6))))
+       "the entry lost or gained an action group")
+(defn line-index [text prefix]
+  (var found nil)
+  (var i 0)
+  (each line (string/split "\n" text)
+    (when (and (nil? found) (string/has-prefix? prefix line)) (set found i))
+    (set i (+ i 1)))
+  found)
+(check "misplaced: the key precedes every action header"
+       (let [k (line-index e6 "DBusActivatable=")
+             a (line-index e6 "[Desktop Action")]
+         (and k a (< k a)))
+       (string "key at " (line-index e6 "DBusActivatable=") " vs action at "
+               (line-index e6 "[Desktop Action")))
+(check "misplaced: the key is stated once"
+       (= 1 (length (filter (fn [l] (string/has-prefix? "DBusActivatable=" l))
+                            (string/split "\n" e6))))
+       "the key was duplicated rather than moved")
+
 # 7. No absolute program: no service file, and the entry must not claim
 #    activation it cannot deliver. The installer's own shebang needs the janet
 #    binary on the PATH, and the machine's janet lives beside a real njuggle in
@@ -204,17 +271,44 @@
   (mkdirs (string base "/share/applications"))
   (mkdirs (string base "/data"))
   (mkdirs (string base "/pathdir"))
-  (os/execute ["ln" "-s" (os/realpath (dyn :executable)) (string base "/pathdir/janet")] :p)
+  # Janet resolves `:executable` through argv[0]; invoked as bare `janet` it
+  # yields a path with no directory and os/realpath throws. Either way a real
+  # `janet` on PATH is the fallback, so the cell works from any invocation.
+  (def exe
+    (or (try (os/realpath (dyn :executable)) ([_] nil))
+        (first (filter (fn [p] (and (exists? p) (not (string/find "/njuggle" p))))
+                       (map (fn [d] (string d "/janet"))
+                            (string/split ":" (or (os/getenv "PATH") "")))))))
+  (unless (and exe (exists? exe))
+    (eprint "cannot locate the janet binary for the nopath cell")
+    (os/exit 2))
+  (os/execute ["ln" "-s" exe (string base "/pathdir/janet")] :p)
   (def entry (string base "/share/applications/org.example.test.desktop"))
   (write-file entry (fill-template (read-file template)))
   base)
+
+(defn no-njuggle-path
+  "The process PATH minus every directory holding a `njuggle`. The machine's
+  own install lives in ~/.local/bin, which is the state the nopath cell must
+  not see: with a real njuggle there, the installer resolves it and the cell
+  would assert on an install this test never made."
+  []
+  (string/join
+    (filter (fn [d] (and (not (empty? d)) (not (exists? (string d "/njuggle")))))
+            (string/split ":" (or (os/getenv "PATH") "")))
+    ":"))
 
 (defn run-off-path [base]
   (with-env "XDG_DATA_HOME" (string base "/data")
     (fn []
       (with-env "NJUGGLE_DESKTOP_INSTALL" "1"
         (fn []
-          (with-env "PATH" (string base "/pathdir:/usr/bin:/bin")
+          # The janet link in pathdir is what resolves the installer's
+          # shebang; the rest of the real PATH is kept so the tools the
+          # installer calls still work, minus every directory that holds a
+          # njuggle - the machine's own install lives in one of them, and the
+          # cell is the state where no njuggle exists anywhere.
+          (with-env "PATH" (string base "/pathdir:" (no-njuggle-path))
             (fn []
               (with-env "NJUGGLE_DBUS_SERVICE_DIR" (string base "/services")
                 (fn []

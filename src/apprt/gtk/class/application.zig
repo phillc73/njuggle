@@ -47,6 +47,7 @@ const GlobalShortcuts = @import("global_shortcuts.zig").GlobalShortcuts;
 const OpenURI = @import("../portal.zig").OpenURI;
 const media = @import("../media.zig");
 const Overrides = @import("Overrides.zig");
+const activation = @import("activation_decision.zig");
 
 const log = std.log.scoped(.gtk_ghostty_application);
 
@@ -189,6 +190,12 @@ pub const Application = extern struct {
         /// once. This prevents quitting the app before we've shown one
         /// window.
         requested_window: bool = false,
+
+        /// Set when an activation has queued a window request, cleared when
+        /// the event loop has created the window it asked for. An activation
+        /// that arrives in that gap - the close/relaunch handover - presents
+        /// the window on its way instead of queuing a second one.
+        window_request_pending: bool = false,
 
         /// This is set to false internally when the event loop
         /// should exit and the application should quit. This must
@@ -1284,6 +1291,21 @@ pub const Application = extern struct {
                 gtk_app.setAccelsForAction("win.focus-sidebar", &zero);
             }
         }
+
+        // The sidebar resize gesture. Same shape and same reason as the two
+        // above: a GTK-local accelerator, not a core `keybind =` line.
+        // `<Ctrl><Shift>r` is unbound in upstream's default keybinds, and the
+        // gesture is inert in `none` mode by its own guard.
+        {
+            const gtk_app = self.as(gtk.Application);
+            if (self.private().config.get().@"gtk-sidebar-tabs" != .none) {
+                const accels = [_:null]?[*:0]const u8{"<Ctrl><Shift>r"};
+                gtk_app.setAccelsForAction("win.resize-sidebar", &accels);
+            } else {
+                const zero = [_:null]?[*:0]const u8{};
+                gtk_app.setAccelsForAction("win.resize-sidebar", &zero);
+            }
+        }
     }
 
     fn syncActionAccelerator(
@@ -1597,13 +1619,41 @@ pub const Application = extern struct {
     fn activate(self: *Self) callconv(.c) void {
         log.debug("activate", .{});
 
-        // Queue a new window
+        // A window is opened only when the application has none and none is
+        // on its way. An activation is forwarded from every launcher route,
+        // and at a close/relaunch handover two arrive before the first window
+        // exists - each one queued a new window, which is the two-window
+        // report. The in-flight flag closes that gap: it is set when this
+        // handler queues a request and cleared when the loop creates the
+        // window (newWindow, below).
         const priv = self.private();
-        _ = priv.core_app.mailbox.push(global.io(), .{
-            .new_window = .{},
-        }, .{ .forever = {} });
+        // GLib's window list is a bare pointer that is NULL when empty, so a
+        // non-null list is what says a window exists. The list belongs to the
+        // application: freeing it here was a double free (the container is
+        // released with the application's own state, and the abort surfaced on
+        // the second activation).
+        const windows = self.as(gtk.Application).getWindows();
+        const any_window = @intFromPtr(windows) != 0;
+        log.debug("activate: window_exists={} pending={}", .{
+            any_window,
+            priv.window_request_pending,
+        });
+        switch (activation.decide(.{
+            .window_exists = any_window,
+            .window_pending = priv.window_request_pending,
+        })) {
+            .open => {
+                priv.window_request_pending = true;
+                _ = priv.core_app.mailbox.push(global.io(), .{
+                    .new_window = .{},
+                }, .{ .forever = {} });
+            },
+            .present => {},
+        }
 
-        // Call the parent activate method.
+        // Call the parent activate method. GApplication's default handler
+        // raises the application's windows: on a forwarded activation that is
+        // what brings the existing window forward, since nothing is queued.
         gio.Application.virtual_methods.activate.call(
             Class.parent,
             self.as(Parent),
@@ -2651,6 +2701,9 @@ const Action = struct {
         const win = Window.new(self, .{
             .title = overrides.title,
         });
+        // The window the activation asked for now exists; the next activation
+        // is answered by the window list rather than by the in-flight flag.
+        self.private().window_request_pending = false;
         initAndShowWindow(
             self,
             win,
