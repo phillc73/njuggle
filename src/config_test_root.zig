@@ -20,4 +20,9 @@ test {
     try @import("std").testing.expect(@TypeOf(build_options) != void);
     try @import("std").testing.expect(@TypeOf(terminal_options) != void);
     _ = @import("config/Config.zig");
+    _ = @import("config/sidebar_width.zig");
+    _ = @import("config/window_size.zig");
+    // The drag's state machine is GTK-free on purpose: its release paths are
+    // the cell the owner's UAT defect belongs to, and this is where they run.
+    _ = @import("apprt/gtk/class/drag.zig");
 }

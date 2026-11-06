@@ -9,6 +9,8 @@ pub const io = @import("config/io.zig");
 pub const string = @import("config/string.zig");
 pub const edit = @import("config/edit.zig");
 pub const url = @import("config/url.zig");
+pub const sidebar_width = @import("config/sidebar_width.zig");
+pub const window_size = @import("config/window_size.zig");
 
 pub const ConditionalState = conditional.State;
 pub const FileFormatter = formatter_file.FileFormatter;

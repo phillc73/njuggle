@@ -67,14 +67,18 @@ gtk-sidebar-tabs = left
 # and you turn them OFF by setting them to false or 0. Delete the line again
 # to get the default back.
 
-# The starting width of the sidebar in pixels. 0 (the default, and what you
-# get with no line here) means the sidebar's own width, a quarter of the
-# window. A non-zero value is the starting width in every window; dragging
-# the sidebar's inner edge, or the `sidebar_resize` keybinding, changes the
-# width for the current session only. Clamped to 150px..half the window, and
-# has no effect in the collapsed (overlay) sidebar or with
+# The width of the sidebar in pixels. 0 (the default, and what you get with
+# no line here) means the sidebar's own width, a quarter of the window. A
+# non-zero value is the width in every window; dragging the sidebar's inner
+# edge, or the `sidebar_resize` keybinding, writes the width here, so the
+# width you set is the width you get back next launch. Floored at 100px, not
+# capped, and no effect in the collapsed (overlay) sidebar or with
 # gtk-sidebar-tabs = none.
 # gtk-sidebar-width = 0
+
+# The window size at its last close, written by Njuggle as WIDTHxHEIGHT.
+# Delete the line to get the default size back next launch.
+# window-size = 1000x700
 
 # The per-tab status icon in the sidebar. true (the default, and what you get
 # with no line here) shows it on every row: grey idle, green while a command

@@ -11,6 +11,7 @@ const gtk = @import("gtk");
 const i18n = @import("../../../os/main.zig").i18n;
 const apprt = @import("../../../apprt.zig");
 const configpkg = @import("../../../config.zig");
+const global = @import("../../../global.zig");
 const TitlebarStyle = configpkg.Config.GtkTitlebarStyle;
 const input = @import("../../../input.zig");
 const CoreSurface = @import("../../../Surface.zig");
@@ -26,6 +27,7 @@ const SplitTree = @import("split_tree.zig").SplitTree;
 const Surface = @import("surface.zig").Surface;
 const Tab = @import("tab.zig").Tab;
 const Sidebar = @import("sidebar.zig").Sidebar;
+const drag = @import("drag.zig");
 const DebugWarning = @import("debug_warning.zig").DebugWarning;
 const CommandPalette = @import("command_palette.zig").CommandPalette;
 const WeakRef = @import("../weak_ref.zig").WeakRef;
@@ -314,6 +316,24 @@ pub const Window = extern struct {
         breakpoint_added: bool = false,
         sidebar: *Sidebar,
 
+        /// The sidebar's last width the user set, in pixels: the config value
+        /// at launch, then any drag or `sidebar_resize` step. The split view
+        /// is never asked for it back - libadwaita holds a fraction, not the
+        /// width - so this is the one record of what was asked for.
+        sidebar_width: u16 = 0,
+
+        /// True once the config's width has been taken for this window.
+        sidebar_width_set: bool = false,
+
+        /// The divider drag's whole state: one value with the transitions in
+        /// `drag.zig`, so the release paths are unit-testable without a window.
+        drag: drag.State = .release(),
+
+        /// The last show-sidebar state seen, and the queued first-width
+        /// apply: the width cannot be placed before the window has a size.
+        show_sidebar_last: c_int = 0,
+        sidebar_width_idle: ?c_uint = null,
+
         pub var offset: c_int = 0;
     };
 
@@ -380,6 +400,52 @@ pub const Window = extern struct {
             .{ .detail = "show-sidebar" },
         );
 
+        // Window resizes re-apply the width: its cap is half the CURRENT
+        // window, so the sidebar has to follow a resize across it.
+        _ = gobject.Object.signals.notify.connect(
+            self.as(gobject.Object),
+            *Self,
+            onDefaultWidthChanged,
+            self,
+            .{ .detail = "default-width" },
+        );
+
+        // The drag's own latch. GTK owns the gesture state machine, and a
+        // press it claims for one gesture is not re-offered to another on the
+        // same widget (probed 2026-11-05: begin, then end, no update between
+        // while the motion controller saw nothing). So the drag gesture claims
+        // the press and the motion controller is denied it; this latch
+        // delivers the press position to the motion side and the drag side
+        // reads the pointer as a delta from it. The release ends the drag.
+        {
+            const press = gtk.GestureClick.new();
+            press.as(gtk.GestureSingle).setButton(1);
+            _ = gtk.GestureClick.signals.pressed.connect(press, *Self, sidebarPressLatch, self, .{});
+            _ = gtk.GestureClick.signals.released.connect(press, *Self, sidebarReleaseLatch, self, .{});
+            // A grab the window system takes back (another window mapping, a
+            // compositor gesture) must not leave the latch following the
+            // pointer for ever: that was the owner's crash-class UAT defect.
+            _ = gtk.Gesture.signals.cancel.connect(press.as(gtk.Gesture), *Self, sidebarDragCancelled, self, .{});
+            priv.split_view.as(gtk.Widget).addController(press.as(gtk.EventController));
+        }
+
+        // The width follows the pointer: a motion controller on the same
+        // widget, listening only while the latch is held. The pointer
+        // leaving the widget does NOT end the drag: a drag taken to the
+        // window edge leaves it, and the pointer has to come back for the
+        // user to release over the divider (F-D6, found by the cells).
+        {
+            const motion = gtk.EventControllerMotion.new();
+            _ = gtk.EventControllerMotion.signals.motion.connect(
+                motion,
+                *Self,
+                sidebarMotion,
+                self,
+                .{},
+            );
+            priv.split_view.as(gtk.Widget).addController(motion.as(gtk.EventController));
+        }
+
         // Set our window icon. We can't set this in the blueprint file
         // because its dependent on the build config.
         self.as(gtk.Window).setIconName(build_config.bundle_id);
@@ -388,6 +454,11 @@ pub const Window = extern struct {
         self.initActionMap();
 
         // Start states based on config.
+        // The size the last close recorded, before the window is shown: the
+        // window-size key beats the built-in default, not a maximise state
+        // (F-D9; maximised-state restore is a named follow-up).
+        self.restoreWindowSize(config);
+
         if (config.maximize) self.as(gtk.Window).maximize();
         if (config.fullscreen != .false) self.as(gtk.Window).fullscreen();
 
@@ -430,6 +501,7 @@ pub const Window = extern struct {
             .init("close-tab-at", actionCloseTabAt, u_variant_type),
             .init("toggle-sidebar", actionToggleSidebar, null),
             .init("focus-sidebar", actionFocusSidebar, null),
+            .init("resize-sidebar", actionResizeSidebar, null),
             .init("ring-bell", actionRingBell, null),
             .init("split-right", actionSplitRight, null),
             .init("split-left", actionSplitLeft, null),
@@ -692,6 +764,270 @@ pub const Window = extern struct {
 
     fn breakpointUnapply(_: *adw.Breakpoint, self: *Self) callconv(.c) void {
         self.private().split_view.setCollapsed(0);
+        self.applySidebarWidth();
+    }
+
+    /// The window width the sidebar's clamps are computed against. Read from
+    /// the toplevel because the sidebar itself is laid out from it.
+    /// The window's width for the sidebar's own limits. The width the user can
+    /// see, not `gtk.Widget.getWidth`: the split view's sidebar sits OUTSIDE
+    /// the window widget's allocation, so the widget reports the body only
+    /// (790 for a 1200px window with 400px of sidebar), and every check
+    /// against it was really a check against the terminal. A drag then looked
+    /// clamped wherever it left the body alone (F-D6, found by the cells).
+    fn sidebarWindowWidth(self: *Self) c_int {
+        return self.private().split_view.as(gtk.Widget).getWidth();
+    }
+
+    /// Put the width the user asked for on the window.
+    ///
+    /// libadwaita sizes `Adw.OverlaySplitView` as
+    /// `min + (max - min) * fraction`, and its own rule is that the fraction
+    /// never shrinks the sidebar below its content's natural width. The width
+    /// asked for is therefore the MAX: with `min` at zero and the fraction at
+    /// one the sidebar takes exactly that, or its natural width where the
+    /// content needs more. Nothing is remembered here - the stored value is
+    /// the user's, and the clamp is applied to it on every call.
+    fn applySidebarWidth(self: *Self) void {
+        const priv = self.private();
+        if (priv.sidebar_width == 0) return;
+        const window_width = self.sidebarWindowWidth();
+        // No width yet is "not ready", not "clamp to nothing": a width applied
+        // against a zero window would be floored and remember itself as the
+        // launch width (found by cell B on 2026-11-05). The width itself is
+        // applied as recorded (F-D8); only the readiness check needs a size.
+        if (window_width <= 0) {
+            self.applySidebarWidthPending();
+            return;
+        }
+        const width = sidebarWidthFloorOnly(priv.sidebar_width);
+        placeSidebarWidth(priv.split_view, width);
+    }
+
+    /// Set the sidebar width from a user gesture (a drag step, or the
+    /// keybinding) and persist it. The one runtime write to the user's
+    /// config, and only ever from an explicit gesture, with the sidebar on
+    /// screen and `gtk-sidebar-tabs = left|right`.
+    ///
+    /// Only the floor applies here (F-D8): what the user chose is what is
+    /// recorded and what is applied. The half-window cap is gone - the split
+    /// view's own layout limits an over-wide sidebar, and clamping before the
+    /// write lost the user's value (F-D6: a drag to the maximum persisted the
+    /// clamped half-window, not the drag).
+    fn setSidebarWidth(self: *Self, width: i64, persist: bool) void {
+        const priv = self.private();
+        const config = if (priv.config) |v| v.get() else return;
+        if (config.@"gtk-sidebar-tabs" == .none) return;
+        if (priv.split_view.getShowSidebar() == 0) return;
+        if (priv.split_view.getCollapsed() != 0) return;
+        const window_width = self.sidebarWindowWidth();
+        if (window_width <= 0) return;
+
+        const floored: u16 = @intCast(sidebarWidthFloorOnly(width));
+        priv.sidebar_width_set = true;
+        priv.sidebar_width = floored;
+        self.applySidebarWidth();
+        // The press that began this drag sits on the edge the width just
+        // moved: everything from here is measured from the pointer and the
+        // new width, so the drag does not walk on stale anchors (F-D6).
+        if (priv.drag.isActive()) priv.drag.reanchor();
+        if (persist) self.persistSidebarWidth(floored);
+    }
+
+    /// Write the one key. Failures are logged and not shown: the sidebar has
+    /// already moved, and a write error must not turn a resize into a dialog.
+    fn persistSidebarWidth(self: *Self, width: u16) void {
+        _ = self;
+        const alloc = std.heap.page_allocator;
+        // The config as opened, not as stored: `createFile` with no truncate
+        // writes over the head of a longer file and leaves the rest, which is
+        // how the write-back quietly stopped applying (found by the cells).
+        const path = configpkg.preferredDefaultFilePath(alloc) catch |err| {
+            log.warn("sidebar width not saved: no config path err={}", .{err});
+            return;
+        };
+        defer alloc.free(path);
+
+        const text = std.Io.Dir.cwd().readFileAlloc(
+            global.io(),
+            path,
+            alloc,
+            .limited(16 * 1024 * 1024),
+        ) catch |err| {
+            log.warn("sidebar width not saved: config not readable err={}", .{err});
+            return;
+        };
+        defer alloc.free(text);
+
+        const updated = configpkg.sidebar_width.upsert(alloc, text, width) catch |err| {
+            log.warn("sidebar width not saved: could not build the edit err={}", .{err});
+            return;
+        };
+        defer alloc.free(updated);
+
+        const file = std.Io.Dir.cwd().createFile(global.io(), path, .{ .truncate = true }) catch |err| {
+            log.warn("sidebar width not saved: config not writable err={}", .{err});
+            return;
+        };
+        defer file.close(global.io());
+        file.writeStreamingAll(global.io(), updated) catch |err| {
+            log.warn("sidebar width not saved: write failed err={}", .{err});
+            return;
+        };
+        file.sync(global.io()) catch |err| {
+            log.warn("sidebar width not saved: sync failed err={}", .{err});
+        };
+    }
+
+    /// The `sidebar_resize` gesture: a step of an eighth of the window from
+    /// the current width, then persist exactly as a drag does. A step that
+    /// would pass half the window goes to the floor instead, so the key can
+    /// be pressed in circles and the sidebar never traps the terminal.
+    fn actionResizeSidebar(
+        _: *gio.SimpleAction,
+        _: ?*glib.Variant,
+        self: *Self,
+    ) callconv(.c) void {
+        const priv = self.private();
+        const config = if (priv.config) |v| v.get() else return;
+        if (config.@"gtk-sidebar-tabs" == .none) return;
+        if (priv.split_view.getShowSidebar() == 0) return;
+        if (priv.split_view.getCollapsed() != 0) return;
+
+        // On a window with no width yet this is the key's own first apply: it
+        // waits for the width the same way the launch apply does.
+        if (self.sidebarWindowWidth() <= 0) {
+            self.applySidebarWidthPending();
+            return;
+        }
+        self.setSidebarWidth(self.sidebarWidthStep(), true);
+    }
+
+    /// One `sidebar_resize` step: the next rung of `STEPS+1` equal steps
+    /// across the window.
+    ///
+    /// The ladder is computed from the WINDOW, not from the width on screen
+    /// (F-D7): stepping from the screen width collapsed onto the same two
+    /// values once a launch had been laid out by the split view's own clamp.
+    /// Rung 0 is the floor, rung STEPS is half the window, and each press
+    /// moves to the next rung; past the top it starts over at the floor, so
+    /// the key can be pressed in circles and never traps the terminal.
+    fn sidebarWidthStep(self: *Self) i64 {
+        const priv = self.private();
+        const window_width = self.sidebarWindowWidth();
+        const on_screen: i64 = priv.sidebar.as(gtk.Widget).getWidth();
+        // The CURRENT rung is where the sidebar stands, a drag included. The
+        // stored width says where it started, not where the user left it: a
+        // launch at a non-rung width followed by a drag up would otherwise
+        // step from a rung that is off screen (F-D7).
+        return sidebarStepNext(0, on_screen, window_width, STEPS);
+    }
+
+    /// A press inside the divider band latches the drag: the width it starts
+    /// from, and the pointer x it started at. Anywhere else the press is the
+    /// list's or the terminal's, so the latch gestures comes back out of the
+    /// press: GTK retries a refusing gesture's press on its siblings, which
+    /// is how the list gets its own click. (Claiming every press and then
+    /// denying it left the split view swallowing the list's clicks entirely,
+    /// F-D6, found by the cells.)
+    fn sidebarPressLatch(gesture: *gtk.GestureClick, _: c_int, x: f64, _: f64, self: *Self) callconv(.c) void {
+        const priv = self.private();
+        priv.drag = .release();
+        if (priv.split_view.getShowSidebar() == 0 or
+            priv.split_view.getCollapsed() != 0 or
+            !sidebarPressIsOnDivider(self, x))
+        {
+            _ = gtk.Gesture.setState(gesture.as(gtk.Gesture), .denied);
+            return;
+        }
+        // Claim, not deny: a DENIED gesture is finished for GTK and emits
+        // neither `released` nor `cancel`, which is how the latch came to
+        // follow the pointer for ever (owner UAT, 2026-11-05). A claimed
+        // press gesture does emit `released` on button-up.
+        _ = gtk.Gesture.setState(gesture.as(gtk.Gesture), .claimed);
+        priv.drag = .press(x, priv.sidebar.as(gtk.Widget).getWidth());
+    }
+
+    /// Whether a press at this x belongs to the divider: the sidebar is up
+    /// and the user has the sidebar tabs on screen.
+    fn sidebarPressIsOnDivider(self: *Self, x: f64) bool {
+        const config = if (self.private().config) |v| v.get() else return false;
+        if (config.@"gtk-sidebar-tabs" == .none) return false;
+        const on_screen = self.private().sidebar.as(gtk.Widget).getWidth();
+        return sidebarDividerHit(x, on_screen);
+    }
+
+    /// A motion while latched: the width follows the pointer while it is on
+    /// the divider. Tugging away stops the follow rather than dragging the
+    /// edge out of its own hit band, so the gesture never strands itself
+    /// (F-D6, found by the cells); coming back re-anchors and follows again.
+    /// No write until the release.
+    fn sidebarMotion(_: *gtk.EventControllerMotion, x: f64, _: f64, self: *Self) callconv(.c) void {
+        const priv = self.private();
+        if (!priv.drag.isActive()) return;
+        const on_screen = priv.sidebar.as(gtk.Widget).getWidth();
+        if (!sidebarDividerHit(x, on_screen)) {
+            _ = priv.drag.follow(x);
+            priv.drag.reanchor();
+            return;
+        }
+        const edge = sidebarDividerEdge(priv.split_view.getSidebarPosition());
+        const moved = priv.drag.follow(x) orelse return;
+        self.setSidebarWidth(moved * edge, false);
+    }
+
+    /// Every way a drag can end: the press gesture's release, a grab broken by
+    /// the window system, and the pointer leaving the window. Each one clears
+    /// the latch; the release is the only one that writes. (A drag that
+    /// leaves the window keeps following the pointer - outside-motion is
+    /// still delivered - so the leave must NOT end it: the cells' drags
+    /// start by moving the pointer out and back, and ending there froze the
+    /// sidebar at its stale width and never wrote, F-D6.)
+    fn endSidebarDrag(self: *Self, how: drag.End) void {
+        const priv = self.private();
+        if (!priv.drag.isActive()) return;
+        const edge: i64 = switch (priv.split_view.getSidebarPosition()) {
+            .start => 1,
+            else => -1,
+        };
+        const r = priv.drag.end(how);
+        priv.drag = r.state;
+        if (r.persist) |moved| self.setSidebarWidth(moved * edge, how.writes());
+    }
+
+    fn sidebarReleaseLatch(gesture: *gtk.GestureClick, _: c_int, _: f64, _: f64, self: *Self) callconv(.c) void {
+        // Only a press this latch claimed gets here; it is finished now, and
+        // the next press starts from a clean gesture.
+        _ = gtk.Gesture.setState(gesture.as(gtk.Gesture), .none);
+        self.endSidebarDrag(.release);
+    }
+
+    /// The press gesture was cancelled: GTK's name for a grab taken back.
+    /// A gesture that denies itself never emits `released` either - the deny
+    /// IS its end, delivered here - so this is the release path for the drag
+    /// this window starts (owner UAT: the latch never cleared, 2026-11-05).
+    fn sidebarDragCancelled(_: *gtk.Gesture, _: ?*gdk.EventSequence, self: *Self) callconv(.c) void {
+        self.endSidebarDrag(.release);
+    }
+
+    /// Re-apply once the window can answer its own size: the first sync
+    /// happens before the first allocation, so the width waits an idle.
+    fn applySidebarWidthPending(self: *Self) void {
+        if (self.private().sidebar_width_idle != null) return;
+        self.private().sidebar_width_idle = glib.timeoutAdd(50, applySidebarWidthIdle, self);
+    }
+
+    fn applySidebarWidthIdle(ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(ud orelse return 0));
+        self.private().sidebar_width_idle = null;
+        // The idle can arrive before the window has a width: wait for one.
+        // The clamp is against it, so a width applied now would be wrong.
+        if (self.as(gtk.Widget).getWidth() <= 0) {
+            self.private().sidebar_width_idle = glib.timeoutAdd(100, applySidebarWidthIdle, self);
+            return 0;
+        }
+        self.applySidebarWidth();
+        return 0;
     }
 
     fn syncSidebar(self: *Self, config: *const configpkg.Config) void {
@@ -704,6 +1040,15 @@ pub const Window = extern struct {
             .right => .end,
             else => .start,
         });
+
+        // The one writer of the split view's width bounds at launch: placing
+        // the width here, after showing and positioning, is what makes it
+        // stick (applying it earlier left the old min/max in place, F-D8).
+        if (show) {
+            priv.sidebar_width = config.@"gtk-sidebar-width";
+            priv.sidebar_width_set = true;
+            self.applySidebarWidth();
+        }
 
         // Tab-bar visibility is NOT set here. `tabsVisibleFor` is the single
         // authority and the tabs-visible property carries its answer to the
@@ -738,6 +1083,17 @@ pub const Window = extern struct {
                 .{},
             );
             self.as(adw.ApplicationWindow).addBreakpoint(breakpoint);
+        }
+
+        // The launch width, at use time. `0` is the toolkit's own fraction,
+        // which this never touches: a window that has not had a width set is
+        // laid out exactly as upstream lays it out. Set once: a config reload
+        // re-running this must not discard the width a drag just chose.
+        if (show and !priv.sidebar_width_set) {
+            priv.sidebar_width_set = true;
+            priv.sidebar_width = config.@"gtk-sidebar-width";
+            // Not applied here: syncSidebar's own bounds write is the one
+            // writer (see init), and it has already been given this value.
         }
     }
 
@@ -816,6 +1172,15 @@ pub const Window = extern struct {
         }
 
         self.syncSidebar(config);
+
+        // The split view's width bounds belong to `syncSidebar` alone: they
+        // were last written by this window, and a second writer applying the
+        // same numbers would rebuild the templates with the OLD min/max.
+        // Only the pending first apply is armed here (F-D8).
+        if (config.@"gtk-sidebar-tabs" != .none) {
+            priv.sidebar_width = config.@"gtk-sidebar-width";
+            self.applySidebarWidthPending();
+        }
 
         // Do our window-protocol specific appearance sync.
         priv.winproto.syncAppearance() catch |err| {
@@ -1705,6 +2070,11 @@ pub const Window = extern struct {
         _: *gtk.Window,
         self: *Self,
     ) callconv(.c) c_int {
+        // Before anything else: remember the size the user is closing at
+        // (F-D9). A maximised or fullscreen window reports its restore size
+        // from getDefaultSize, which is what the next launch should open at.
+        self.persistWindowSize();
+
         if (self.getNeedsConfirmQuit()) {
             // Show a confirmation dialog
             const dialog: *CloseConfirmationDialog = .new(.window);
@@ -2214,8 +2584,91 @@ pub const Window = extern struct {
         self: *Self,
     ) callconv(.c) void {
         const priv = self.private();
+        // Showing the sidebar is the earliest point its width can be applied:
+        // syncSidebar runs before the window has any width.
+        if (priv.split_view.getShowSidebar() != 0) {
+            if (priv.show_sidebar_last == 0) self.applySidebarWidthPending();
+            priv.show_sidebar_last = 1;
+        } else {
+            priv.show_sidebar_last = 0;
+        }
         if (priv.split_view.getShowSidebar() != 0) return;
         if (self.getActiveSurface()) |surface| surface.grabFocus();
+    }
+
+    /// The window changed size: the half-window cap moved with it.
+    fn onDefaultWidthChanged(
+        _: *gobject.Object,
+        _: *gobject.ParamSpec,
+        self: *Self,
+    ) callconv(.c) void {
+        const priv = self.private();
+        const config = if (priv.config) |v| v.get() else return;
+        if (config.@"gtk-sidebar-tabs" == .none) return;
+        if (priv.split_view.getShowSidebar() == 0) return;
+        self.applySidebarWidth();
+    }
+
+    /// The window's size at close, written to the config so the next launch
+    /// opens at it (F-D9). `getDefaultSize` reports the size the window would
+    /// return to - the restore size while maximised or fullscreen, the real
+    /// size otherwise - which is exactly what should come back.
+    fn persistWindowSize(self: *Self) void {
+        var w: c_int = 0;
+        var h: c_int = 0;
+        self.as(gtk.Window).getDefaultSize(&w, &h);
+        if (w <= 0 or h <= 0) return;
+        const width: u16 = @intCast(@min(w, std.math.maxInt(u16)));
+        const height: u16 = @intCast(@min(h, std.math.maxInt(u16)));
+
+        const alloc = std.heap.page_allocator;
+        const path = configpkg.preferredDefaultFilePath(alloc) catch |err| {
+            log.warn("window size not saved: no config path err={}", .{err});
+            return;
+        };
+        defer alloc.free(path);
+
+        const text = std.Io.Dir.cwd().readFileAlloc(
+            global.io(),
+            path,
+            alloc,
+            .limited(16 * 1024 * 1024),
+        ) catch |err| {
+            log.warn("window size not saved: config not readable err={}", .{err});
+            return;
+        };
+        defer alloc.free(text);
+
+        const updated = configpkg.sidebar_width.upsertWindowSize(alloc, text, width, height) catch |err| {
+            log.warn("window size not saved: could not build the edit err={}", .{err});
+            return;
+        };
+        defer alloc.free(updated);
+
+        const file = std.Io.Dir.cwd().createFile(global.io(), path, .{ .truncate = true }) catch |err| {
+            log.warn("window size not saved: config not writable err={}", .{err});
+            return;
+        };
+        defer file.close(global.io());
+        file.writeStreamingAll(global.io(), updated) catch |err| {
+            log.warn("window size not saved: write failed err={}", .{err});
+            return;
+        };
+        file.sync(global.io()) catch |err| {
+            log.warn("window size not saved: sync failed err={}", .{err});
+        };
+    }
+
+    /// The recorded window size, applied before the window is shown: the
+    /// launch size the last close left behind. An absent or malformed value
+    /// leaves the window at its own default.
+    fn restoreWindowSize(self: *Self, config: *const configpkg.Config) void {
+        const raw = config.@"window-size" orelse return;
+        const size = configpkg.window_size.parse(raw) orelse {
+            log.warn("window size ignored: cannot parse {s}", .{raw});
+            return;
+        };
+        self.as(gtk.Window).setDefaultSize(size.width, size.height);
     }
 
     fn actionCloseTab(
@@ -2554,6 +3007,150 @@ pub const Window = extern struct {
         pub const bindTemplateCallback = C.Class.bindTemplateCallback;
     };
 };
+
+// The sidebar width's use-time rules, as pure functions so they are testable
+// without a window. The stored value is never clamped: a narrower window
+// re-applies these on every call.
+
+/// How many `sidebar_resize` presses cross the window: four (owner UAT ruling,
+/// 2026-11-05; it was eight).
+pub const STEPS: i64 = 4;
+
+/// The narrowest the sidebar may be: a narrower one is unusable, and the tab
+/// rows need room for a title and the two marks beside it. 100 since the
+/// owner's fix round (was 150 at UAT).
+fn sidebarWidthFloor() u16 {
+    return 100;
+}
+
+/// The window width lifetime: a sidebar width at the floor, with no cap.
+///
+/// The half-window cap is gone (F-D8, owner ruling): the recorded width is
+/// what is applied, and the split view's own layout limits an over-wide
+/// sidebar. `0` means "no width": the toolkit's own layout.
+fn sidebarWidthFloorOnly(stored: i64) i64 {
+    if (stored <= 0) return 0;
+    return @max(stored, @as(i64, 100));
+}
+
+/// Put a pixel width on the split view.
+///
+/// libadwaita lays the sidebar out no narrower than its CONTENT's natural
+/// width (127px on this toolkit, with the default row), so a request below
+/// that lands on 127 whatever min/max say. The width is therefore applied as
+/// min = width, max = width: the request is a floor under the content, never
+/// a ceiling above it, and everything from the floor up is exact.
+fn placeSidebarWidth(view: *adw.OverlaySplitView, width: i64) void {
+    const w: f32 = @floatFromInt(width);
+    view.setSidebarWidthUnit(.px);
+    view.setMinSidebarWidth(w);
+    view.setMaxSidebarWidth(w);
+    view.setSidebarWidthFraction(1.0);
+}
+
+/// The rungs of the `sidebar_resize` ladder: `steps + 1` values from the
+/// floor to half the window. `steps` is STEPS (owner ruling: four presses
+/// cross the window, so five positions including both ends).
+fn sidebarStepRung(stored: u16, on_screen: i64, window_width: c_int, steps: i64) i64 {
+    const w: i64 = @max(window_width, 0);
+    const floor: i64 = 100;
+    const top = @max(@divTrunc(w, 2), floor);
+    if (top <= floor) return floor;
+    // The current rung: the stored width, else whatever is on screen.
+    const current: i64 = if (stored != 0) @intCast(stored) else on_screen;
+    var idx: i64 = 0;
+    var best: i64 = -1;
+    var r: i64 = 0;
+    while (r <= steps) : (r += 1) {
+        const pos: i64 = floor + @divTrunc((top - floor) * r, steps);
+        const dist: i64 = @intCast(@abs(pos - current));
+        if (best < 0 or dist < best) {
+            best = dist;
+            idx = r;
+        }
+    }
+    if (idx >= steps) return floor;
+    return floor + @divTrunc((top - floor) * (idx + 1), steps);
+}
+
+/// One press of `sidebar_resize`: the next rung after the current width.
+fn sidebarStepNext(stored: u16, on_screen: i64, window_width: c_int, steps: i64) i64 {
+    return sidebarStepRung(stored, on_screen, window_width, steps);
+}
+
+/// How wide the band that starts a divider drag is, in pixels either side of
+/// the sidebar's trailing edge.
+fn sidebarDividerBand() f64 {
+    return 5.0;
+}
+
+/// A press at `x` inside the sidebar whose visible width is `sidebar_width`
+/// starts a drag when it lands within the band on either side of the edge.
+fn sidebarDividerHit(x: f64, sidebar_width: c_int) bool {
+    if (sidebar_width <= 0) return false;
+    return @abs(x - @as(f64, @floatFromInt(sidebar_width))) <= sidebarDividerBand();
+}
+
+/// The direction a pointer step moves the width: in a right-hand sidebar the
+/// boundary is on the window's left edge and a rightward drag SHRINKS it.
+fn sidebarDividerEdge(position: gtk.PackType) i64 {
+    return if (position == .end) -1 else 1;
+}
+
+test "sidebarWidthFloorOnly: the floor, and NO half-window cap (F-D8)" {
+    const t = std.testing;
+    // The floor holds...
+    try t.expectEqual(@as(i64, 100), sidebarWidthFloorOnly(40));
+    try t.expectEqual(@as(i64, 100), sidebarWidthFloorOnly(100));
+    // ...the user's value passes through untouched, however wide...
+    try t.expectEqual(@as(i64, 300), sidebarWidthFloorOnly(300));
+    try t.expectEqual(@as(i64, 1000), sidebarWidthFloorOnly(1000));
+    // ...and 0 still means "no width".
+    try t.expectEqual(@as(i64, 0), sidebarWidthFloorOnly(0));
+}
+
+test "sidebarStepRung: four presses give four distinct rungs, then the floor" {
+    const t = std.testing;
+    try t.expectEqual(@as(i64, 4), STEPS);
+    // An 800px window: rungs at 100, 200, 300, 400 (half). The CURRENT rung
+    // is where the sidebar stands on screen, not the stored launch width: a
+    // drag leaves the two apart, and the window's own padding puts a width a
+    // few pixels under its rung, so the nearest rung is decided from the
+    // screen (F-D7, found by the cells).
+    try t.expectEqual(@as(i64, 200), sidebarStepNext(0, 100, 800, STEPS));
+    try t.expectEqual(@as(i64, 300), sidebarStepNext(0, 200, 800, STEPS));
+    try t.expectEqual(@as(i64, 400), sidebarStepNext(0, 300, 800, STEPS));
+    try t.expectEqual(@as(i64, 100), sidebarStepNext(0, 400, 800, STEPS));
+    // A width that is not a rung snaps to the next rung above.
+    try t.expectEqual(@as(i64, 300), sidebarStepNext(0, 250, 800, STEPS));
+    // A stored width is NOT the current rung: 400 stored, 175 on screen, the
+    // next press goes to the rung above 175.
+    try t.expectEqual(@as(i64, 275), sidebarStepNext(400, 175, 1600, STEPS));
+}
+
+test "sidebarStepRung: the ladder adapts to the window" {
+    const t = std.testing;
+    // 1600px window: 100, 475, 850, 1225, 1600 is half, so top = 800.
+    try t.expectEqual(@as(i64, 275), sidebarStepNext(100, 100, 1600, STEPS));
+    // A window narrower than twice the floor has one rung: the floor.
+    try t.expectEqual(@as(i64, 100), sidebarStepNext(100, 100, 160, STEPS));
+}
+
+test "sidebarDividerHit: the band on both sides of the edge, nothing else" {
+    const t = std.testing;
+    try t.expect(sidebarDividerHit(200, 200));
+    try t.expect(sidebarDividerHit(196, 200));
+    try t.expect(sidebarDividerHit(204, 200));
+    try t.expect(!sidebarDividerHit(100, 200));
+    try t.expect(!sidebarDividerHit(260, 200));
+    try t.expect(!sidebarDividerHit(0, 0));
+}
+
+test "sidebarDividerEdge: the drag direction follows the sidebar's side" {
+    const t = std.testing;
+    try t.expectEqual(@as(i64, 1), sidebarDividerEdge(.start));
+    try t.expectEqual(@as(i64, -1), sidebarDividerEdge(.end));
+}
 
 // The tab bar's visibility decision, as a pure function so the precedence
 // table can be tested without constructing a GObject window.
