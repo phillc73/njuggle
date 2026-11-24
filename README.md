@@ -10,6 +10,10 @@ Njuggle is regularly re-based on the latest libghostty and enjoys all
 the performance enhancements being built upstream by that excellent
 team.
 
+libghostty is the terminal core library that Njuggle shares with
+Ghostty. Njuggle adds the sidebar on top of it; the terminal itself is
+the upstream code.
+
 The minor enhancements:
 
 - A vertical tab sidebar with live titles and working directory displayed.
@@ -41,6 +45,14 @@ need your attention. A notification bell will also turn the icon red,
 because some things need your attention without a process running at
 all. Once you've looked at the tab with the red icon, it returns to
 grey.
+
+A command that has been running for a while stops reading as "busy" and
+starts reading as "long": past `gtk-sidebar-status-long-after` (60
+seconds by default) the icon turns dim green, and it dims whether you are
+looking at the tab or not. Dim green outranks bright green when a split
+tab mixes panes. The icon stays dim until the command resolves - red if
+it finished while you were in another tab, grey if you were watching -
+and a bell turns it red while the command is still running.
 
 ## Configuration: Njuggle's own settings
 
@@ -96,12 +108,25 @@ multi-pane tabs only, and the focused pane is never dimmed.
 The second group is **on unless you turn it off**: these already work
 with no line in your file at all.
 
-`gtk-sidebar-width` sets a fixed sidebar width in pixels. It is
-accepted in the config today but **not implemented yet**: the sidebar
-width is currently set automatically by the toolkit - a fraction of
-the window's width, growing with the window only as far as its
-content needs. A fixed-width option, drag-resize on the sidebar's
-inner edge, and width persistence are planned.
+`gtk-sidebar-width` sets a fixed sidebar width in pixels:
+
+```
+gtk-sidebar-width = 200
+```
+
+`0` means "the sidebar's own width": a fraction of the window, which is
+what you get with no line in the file. A non-zero value is the sidebar's
+width in every window, clamped at use time to 150 pixels at the narrow end
+and half the window at the wide end - both re-applied whenever the window
+changes size, so a window that grows shows more sidebar, never more than
+half of it.
+
+Dragging the sidebar's inner edge, or pressing `Ctrl+Shift+R`, changes the
+width and **saves it**: Njuggle rewrites the one `gtk-sidebar-width` line
+in your config (adding it if it is not there) and leaves every other byte
+of the file, comments included, exactly as you wrote it. Nothing else in
+your config is ever written by Njuggle. In a collapsed (overlay) sidebar or
+with `gtk-sidebar-tabs = none` the gesture does nothing.
 
 `gtk-sidebar-status-icon` shows the per-tab status icon described under
 [Status icons](#status-icons) above:
@@ -122,6 +147,18 @@ gtk-sidebar-status-after = 5s
 The default is 5 seconds. Set it to `0` to mark every unfocused finish.
 It requires `gtk-sidebar-status-icon`.
 
+`gtk-sidebar-status-long-after` is how long a command may run before its
+icon dims:
+
+```
+gtk-sidebar-status-long-after = 60s
+```
+
+The default is 60 seconds. A command that runs past it turns the icon dim
+green: the tab is still busy, it has stopped being news. The icon dims
+while the tab is focused too, and a new command in the same pane starts
+bright green again. It requires `gtk-sidebar-status-icon`.
+
 ## Configuration: everything else is Ghostty
 
 Njuggle uses its own config file, located at
@@ -137,9 +174,9 @@ https://ghostty.org/docs
 One inherited Ghostty option ships pinned in the default config:
 `window-show-tab-bar = never` - the sidebar replaces the top tab bar.
 
-One consequence of the separate config file: if you're already a Ghostty user, your font and theme
-choices live in the Ghostty config. Copy them across to
-`~/.config/njuggle/config` when you first set it up. 
+One consequence of the separate config file: if you are already a Ghostty
+user, your font and theme choices live in the Ghostty config, and Njuggle
+does not read them.
 
 ## Building from source
 
@@ -178,10 +215,14 @@ config is never overwritten. Copying `zig-out/bin/njuggle` into
 
 ## Releases
 
-The first release is built from source. CI-built binaries (a Linux
-tarball, possibly Flatpak) are planned if there is interest. There is
-no macOS build: the sidebar is GTK-only and targets Linux and
-Unix-like systems.
+Tagged releases carry a prebuilt Linux binary. The `v*` tag pipeline
+builds a `njuggle-vX.Y.Z-x86_64-linux.tar.gz` release asset: the
+ReleaseFast binary, the desktop entry, the hicolor icons and the
+shipped default config, with a sha256 file published alongside. Build
+from source (above) when no tarball fits the machine. To install the
+tarball, extract it and run `sh njuggle-install.sh` from the extracted
+directory. Flatpak is not yet built. There is no macOS build: the
+sidebar is GTK-only and targets Linux and Unix-like systems.
 
 ## Parity with Ghostty
 
@@ -203,20 +244,34 @@ Based on Ghostty 1.4.0.
   Ghostty releases.
 
 Njuggle has its own version, independent of the Ghostty release it is
-based on. This release is Njuggle 0.1.0, based on Ghostty 1.4.0; the
+based on. This release is Njuggle 0.1.1, based on Ghostty 1.4.0; the
 Ghostty base moves with each rebase without moving Njuggle's version.
-The build reports both: `+version` prints `0.1.0+ghostty.1.4.0`.
+The build reports both: `+version` prints `0.1.1+ghostty.1.4.0`.
+
+## Tests
+
+The unit suite runs with the pinned Zig on `PATH`:
+
+```
+./ci/run-test-units.sh
+```
+
+The Zig test suite on its own is `zig build test`. It needs a machine with
+more than 12 GB of RAM; on a smaller machine, filter it:
+`zig build test -Dtest-filter=<name>`. The GUI checks in `scripts/` are
+Janet scripts that take the repository root, for example
+`janet scripts/check-config-matrix.janet .`. `scripts/check-none-parity.sh`
+compares `none` mode against an installed Ghostty binary.
 
 ## Known limits
 
 - The fetched glslang build carries a local `-O0` patch on
   `SPIRV/doc.cpp` for Zig 0.17, which compiles that one file without
-  optimization. It is a workaround for a Zig compile failure, it costs
+  optimisation. It is a workaround for a Zig compile failure, it costs
   nothing at runtime, and it will be removed when a Zig release no
   longer needs it.
-- The full test suite needs a machine with more than 12 GB of RAM.
 
-## License
+## Licence
 
 Njuggle's own work is licensed under the GNU Affero General Public
 License, version 3: see [LICENSE](LICENSE).

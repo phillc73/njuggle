@@ -1,8 +1,13 @@
 #!/bin/sh
 # njuggle-clean.sh - remove everything Njuggle from the LOCAL machine,
 # matching the install layout (binary, desktop entry, the
-# D-Bus service file, the five hicolor sizes, config and data trees), so the
+# D-Bus service file, the five hicolor sizes and the data tree), so the
 # next install is genuinely fresh. Licence: AGPLv3 (njuggle).
+#
+# EXCEPTION - the user's config is never removed. `~/.config/njuggle` holds
+# the user's own settings; a clean is a reinstall, not a reset, and the next
+# install seeds the default only when no config exists. Remove the directory
+# by hand if a genuine factory state is what you want.
 # Run on the DESKTOP: sh njuggle-clean.sh
 set -eu
 
@@ -33,10 +38,20 @@ for s in 32x32 64x64 128x128 256x256 512x512; do
     rm -f "$HOME/.local/share/icons/hicolor/$s/apps/org.mimosadev.njuggle.png"
     rm -f "$HOME/.local/share/icons/hicolor/$s/apps/org.mimosadev.njuggle-debug.png"
 done
+rm -f "$HOME/.local/share/icons/hicolor/scalable/actions/njuggle-divider.svg"
 gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || :
 
-echo "== removing config + data"
-rm -rf "$HOME/.config/njuggle"
+echo "== removing the shell's terminfo entry"
+# The installer compiles the shipped terminfo into the user's terminfo
+# database so the shell inside the terminal knows its own TERM. A stale entry
+# outliving the binary is a TERM the app describes but nothing else does.
+rm -rf "$HOME/.local/share/terminfo/x/xterm-ghostty"
+rm -f "$HOME/.local/share/terminfo/g/ghostty"
+
+echo "== removing data (the config is kept)"
+# R6 install/preserve contract: the user's config survives a clean.
+# `njuggle-install.sh` seeds `config.default` only when no config exists, so a
+# kept config is never overwritten by the install that follows.
 rm -rf "$HOME/.local/share/njuggle"
 
 echo "== removing caches/state if any"
@@ -49,7 +64,7 @@ update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || :
 echo "== verify (no output above each = clean)"
 which njuggle || true
 ls "$HOME/.local/bin/njuggle" 2>/dev/null || true
-ls "$HOME/.config/njuggle" 2>/dev/null || true
+ls "$HOME/.config/njuggle" 2>/dev/null || true   # kept on purpose
 ls "$HOME/.local/share/njuggle" 2>/dev/null || true
 ls "$HOME/.local/share/applications" 2>/dev/null | /usr/bin/grep -i njuggle || true
 ls "$HOME/.local/share/dbus-1/services" 2>/dev/null | /usr/bin/grep -i njuggle || true

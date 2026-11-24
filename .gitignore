@@ -29,3 +29,11 @@ vgcore.*
 # Zig package cache: fetched dependencies, content-addressed.
 /zig-pkg/
 
+# CI scratch trees: toolchain, caches, staged install, release archives.
+/.ci-tools/
+/.ci-xdg/
+/.zig-global/
+/package/
+/dist/*.tar.gz
+/dist/*.sha256
+

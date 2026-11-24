@@ -119,6 +119,41 @@ pub fn resourcesDir(alloc: Allocator) !ResourcesDir {
         }
     }
 
+    // A user-prefix install: the desktop installer puts the terminfo
+    // sentinel under the data home (see the build's Terminfo sentinel step).
+    // The climb above never reaches there, because <prefix>/bin and
+    // <prefix>/share/site-terminfo are siblings of the data home, not
+    // ancestors of the binary. The two sentinels are the same pair the climb
+    // uses, so a directory this returns is a resources directory by the same
+    // rule - and its terminfo is the build's own.
+    user_prefix: {
+        // `getAlloc` is the Environ's only read entry point (there is no
+        // `get`); the value is owned, so both lookups are freed here.
+        const home = global.environ().getAlloc(alloc, "HOME") catch break :user_prefix;
+        defer alloc.free(home);
+        if (home.len == 0) break :user_prefix;
+        var data_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const xdg = global.environ().getAlloc(alloc, "XDG_DATA_HOME") catch |err| switch (err) {
+            error.EnvironmentVariableMissing => null,
+            else => break :user_prefix,
+        };
+        defer if (xdg) |v| alloc.free(v);
+        const data = if (xdg) |v|
+            (if (v.len > 0) v else null)
+        else
+            null;
+        const data_home: []const u8 = data orelse blk: {
+            break :blk std.mem.print(&data_buf, "{s}/.local/share", .{home}) catch
+                break :user_prefix;
+        };
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        inline for (.{ "site-terminfo/g/ghostty", "site-terminfo/x/xterm-ghostty" }) |sentinel| {
+            if (try maybeDir(&buf, data_home, "njuggle", sentinel)) |v| {
+                return .{ .app_path = try std.fs.path.join(alloc, &.{ v, "ghostty" }) };
+            }
+        }
+    }
+
     return .{};
 }
 

@@ -62,7 +62,14 @@ pub const SidebarRow = extern struct {
                 Self,
                 ?*adw.TabPage,
                 .{
-                    .accessor = C.privateObjFieldAccessor("page"),
+                    .accessor = gobject.ext.typedAccessor(
+                        Self,
+                        ?*adw.TabPage,
+                        .{
+                            .getter = Self.getPage,
+                            .setter = Self.setPage,
+                        },
+                    ),
                 },
             );
         };
@@ -95,11 +102,29 @@ pub const SidebarRow = extern struct {
         /// `init`, since blueprint has no syntax for a GType list.
         drop_target: *gtk.DropTarget,
 
+        /// The backfill icon in the row's bottom-right corner
+        /// (requirements, ICON-BACKFILL). An overlay child, so it takes no
+        /// space from the text. It paints nothing: the stylesheet gives it a
+        /// zero opacity in every state (owner UAT 2026-11-20, cell 1.1), and
+        /// it stays as the sibling the X shares the corner with.
+        backfill_image: *gtk.Image,
+
         /// Actions the menu items target, scoped to this row under "row".
         action_group: ?*gio.SimpleActionGroup = null,
 
         /// Second-level pane rows, one per leaf in the tab's split tree.
         panes_box: *gtk.Box,
+
+        /// The row's own box: the template's overlay root, which carries the
+        /// row's styles and the hover state class. A row's children do not
+        /// report their hover to the row, so the row's motion controller owns
+        /// the class and the stylesheet turns the close button's opacity on it.
+        row_box: *gtk.Overlay,
+
+        /// The close button, hidden at rest and revealed on hover. Named so
+        /// the reveal has one control to style and the accessibility name
+        /// can be checked against a real widget.
+        close_button: *gtk.Button,
 
         /// The per-tab status indicator, left of the close button. Fed from
         /// the leaf surfaces' "status" property (tab_status.zig holds the
@@ -459,12 +484,39 @@ pub const SidebarRow = extern struct {
         return page;
     }
 
+    /// The `page` property's reader. A typed accessor rather than the shared
+    /// object-field one: the page is set from the list factory's bind, and the
+    /// varargs marshaller used by the object-field accessor crashed there.
+    pub fn getPage(self: *Self) ?*adw.TabPage {
+        return self.private().page;
+    }
+
+    /// The `page` property's writer. The factory calls it on bind and clears
+    /// it on unbind, so a recycled row never holds a page the item no longer
+    /// carries, and the blueprint bindings on `template.page` update.
+    pub fn setPage(self: *Self, page: ?*adw.TabPage) void {
+        self.private().page = page;
+        self.as(gobject.Object).notifyByPspec(properties.page.impl.param_spec);
+    }
+
     fn actionClose(
         _: *gio.SimpleAction,
         _: ?*glib.Variant,
         self: *Self,
     ) callconv(.c) void {
         self.closeTab();
+    }
+
+    /// The pointer entered the row (or moved within it): reveal the close
+    /// button. `motion` repeats this, which is what keeps the class on while
+    /// the pointer travels across the row's children.
+    fn hoverEnter(_: *gtk.EventControllerMotion, _: f64, _: f64, self: *Self) callconv(.c) void {
+        self.private().row_box.as(gtk.Widget).addCssClass("njuggle-hover");
+    }
+
+    /// The pointer left the row: the button goes back to transparent.
+    fn hoverLeave(_: *gtk.EventControllerMotion, self: *Self) callconv(.c) void {
+        self.private().row_box.as(gtk.Widget).removeCssClass("njuggle-hover");
     }
 
     /// Close this row's tab.
@@ -595,6 +647,11 @@ pub const SidebarRow = extern struct {
             class.bindTemplateChildPrivate("panes_box", .{});
             class.bindTemplateChildPrivate("drag_source", .{});
             class.bindTemplateChildPrivate("drop_target", .{});
+            class.bindTemplateChildPrivate("row_box", .{});
+            class.bindTemplateChildPrivate("backfill_image", .{});
+            class.bindTemplateChildPrivate("close_button", .{});
+            class.bindTemplateCallback("hover_enter", &hoverEnter);
+            class.bindTemplateCallback("hover_leave", &hoverLeave);
             class.bindTemplateCallback("close_clicked", &closeClicked);
             class.bindTemplateCallback("right_click", &rightClick);
             class.bindTemplateCallback("computed_cwd", &closureCwd);

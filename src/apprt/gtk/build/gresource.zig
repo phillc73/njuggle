@@ -64,11 +64,12 @@ pub const blueprints: []const Blueprint = &.{
 
 /// The sidebar status indicator's images, compiled into the binary.
 ///
-/// Owner-supplied artwork for the three states, staged at
-/// `images/status/{green,red,grey}/`. The directory names are fixed by
+/// Owner-supplied artwork for the four states, staged at
+/// `images/status/{green,green-dim,red,grey}/`. The directory names are fixed by
 /// tab_status.zig (`assetColour`); 64 is the icon size drawn on a 2x row.
 pub const status_icons = [_]struct { colour: []const u8, file: []const u8 }{
     .{ .colour = "green", .file = "images/status/green/64.png" },
+    .{ .colour = "green-dim", .file = "images/status/green-dim/64.png" },
     .{ .colour = "red", .file = "images/status/red/64.png" },
     .{ .colour = "grey", .file = "images/status/grey/64.png" },
 };

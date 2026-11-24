@@ -230,3 +230,60 @@ label.resize-overlay {
   margin: 0;
   padding: 0;
 }
+
+/*
+ * Sidebar row: the backfill icon, and the close button that appears on hover.
+ *
+ * The reveal is opacity, not visibility, so nothing reflows when the pointer
+ * crosses the row. A row whose state does not say "hover" (`.njuggle-hover`,
+ * set from the row's motion controller) keeps the button transparent; the
+ * state class comes from the controller because hover does not bubble from a
+ * row's children upwards.
+ *
+ * Both classes are carried by the widgets themselves (the row's overlay root
+ * and the button in sidebar-row.blp), not by the toolkit's listview internals:
+ * the row template is a child of the list item, and a selector written through
+ * that internals chain is one upstream rename away from silently matching
+ * nothing.
+ *
+ * The X's size is here and nowhere else. GTK applies a widget's own minimum
+ * (a button's is ~32px logical) over anything smaller, and the DPI scale turns
+ * whatever minimum into device pixels - which is how a 12px request landed
+ * inside the tab borders on a 1.45-scale desktop. Both properties are set
+ * together: min-width alone is a floor, min-height alone is a floor, and a
+ * button with a padded icon still measures its padding. `padding: 0` and
+ * `min-width: 12px` with the natural size smaller than that gives a 12px
+ * logical box at every scale.
+ */
+.njuggle-row button.njuggle-row-close {
+  padding: 0;
+  min-width: 12px;
+  min-height: 12px;
+  opacity: 0;
+  transition: opacity 80ms ease-in-out;
+}
+
+.njuggle-row.njuggle-hover button.njuggle-row-close {
+  opacity: 1;
+}
+
+/* Keyboard users are not left without the control: a row that holds focus
+ * shows it too, and the row is reachable through the tab list. */
+.njuggle-row:focus button.njuggle-row-close,
+.njuggle-row:focus-within button.njuggle-row-close {
+  opacity: 1;
+}
+
+/* The backfill icon (requirements, ICON-BACKFILL - display half superseded by
+ * the owner's UAT of 2026-11-20, cell 1.1): the row's trailing corner carries
+ * no mark, at rest or on hover; a resting row is its title, its working
+ * directory and the status mark. The image stays in the template as the
+ * overlay sibling the X shares the corner with, and its visibility is this
+ * rule's, on the row's own state scope - the same source the X's reveal reads -
+ * resolving to zero in both states. The text above it is not tied to it: a
+ * narrow row ellipsizes the text first. */
+.njuggle-row image.backfill {
+  min-width: 16px;
+  min-height: 16px;
+  opacity: 0;
+}

@@ -95,20 +95,60 @@
   (eprint "njuggle: no installed share tree at " share ", nothing to install")
   (os/exit 0))
 
-# Icons: every size the build wrote, under the app id.
+# Icons: every hicolor directory the build wrote, files and all. Walking one
+# level (size/apps) missed scalable/actions, where the divider's drag
+# affordance lives - a set of icons that is not every directory anyway is a
+# set that drops the next category someone adds.
 (def icons-src (string share "/icons/hicolor"))
 (def icons-dst (string data-home "/icons/hicolor"))
+
+(defn copy-tree
+  "Copy every regular file under `from` into the same relative path under
+  `to`, creating directories as needed. Returns the count."
+  [from to]
+  (var n 0)
+  (each entry (os/dir from)
+    (def src (string from "/" entry))
+    (def dst (string to "/" entry))
+    (def m (mode-of src))
+    (if (= m :directory)
+      (set n (+ n (copy-tree src dst)))
+      (when (not (nil? m))
+        (copy src dst)
+        (++ n))))
+  n)
+
 (var copied 0)
 (when (= (mode-of icons-src) :directory)
-  (each size (os/dir icons-src)
-    (def apps (string icons-src "/" size "/apps"))
-    (when (= (mode-of apps) :directory)
-      (each file (os/dir apps)
-        (when (string/has-suffix? ".png" file)
-          (copy (string apps "/" file) (string icons-dst "/" size "/apps/" file))
-          (++ copied))))))
+      (set copied (copy-tree icons-src icons-dst)))
 
 (print (string "njuggle: installed " copied " icon files into " icons-dst))
+
+# Terminfo, under the data home where a user-prefix install can find it.
+#
+# The binary finds its resources directory by the two sentinel names below
+# (src/os/resourcesdir.zig). The build installs them under <prefix>/share for
+# system packages; that location is not an ancestor of a data-home install,
+# so the same bytes go to the data home and resourcesdir.zig looks there by
+# the same pair. This is what the terminal's own entry is read from: without
+# it the shell reports "unknown terminal type" and prints no prompt, and the
+# app logs "no resources dir set, shell integration disabled".
+(def terminfo-src (string share "/site-terminfo"))
+(def terminfo-dst (string data-home "/njuggle/site-terminfo"))
+(var terminfo-copied 0)
+(when (= (mode-of terminfo-src) :directory)
+  (set terminfo-copied (copy-tree terminfo-src terminfo-dst)))
+(when (> terminfo-copied 0)
+  (print (string "njuggle: installed terminfo into " terminfo-dst))
+  (each entry (os/dir (string terminfo-dst "/g"))
+    (def path (string terminfo-dst "/g/" entry))
+    (def rc (try (os/execute ["tic" "-x" "-o" (string data-home "/terminfo") path] :p)
+                 ([_] -1)))
+    (unless (= rc 0)
+      (eprint (string "njuggle: tic could not compile " path
+                      " (exit " rc "); the resources directory marker is "
+                      "installed, the shell's terminfo lookup falls back "
+                      "to $TERM's entry if one exists")))))
 
 # Desktop entry. The build writes it under the (possibly -debug suffixed) app
 # id; install whichever one exists. The Exec line names the binary by PATH

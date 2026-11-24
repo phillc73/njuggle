@@ -2,6 +2,10 @@ using Gtk 4.0;
 using Adw 1;
 
 template $GhosttySidebar: Adw.Bin {
+  // The divider drag affordance is drawn by the window on the sidebar's
+  // trailing edge (window.zig), not carried as a widget here: a Gtk.Overlay
+  // wrapper held the ScrolledWindow unallocated and the tab list never
+  // mapped (njuggle-notabs-hunt.md).
   Gtk.ScrolledWindow {
     hscrollbar-policy: never;
     vexpand: true;
@@ -15,7 +19,7 @@ template $GhosttySidebar: Adw.Bin {
       // are read before GtkListView's own bindings: Enter/Space must mean
       // "activate this tab" (and hand focus back to the terminal), Escape must
       // return focus to the terminal. Up/Down are deliberately NOT handled
-      // here — they fall through to the list's native cursor movement, which
+      // here: they fall through to the list's native cursor movement, which
       // for a single selection moves the highlight.
       EventControllerKey {
         propagation-phase: capture;
@@ -23,7 +27,7 @@ template $GhosttySidebar: Adw.Bin {
       }
 
       // autoselect must be off. It defaults on, and on an EMPTY model it
-      // forces a selection of item 0 — which reaches through AdwTabPages into
+      // forces a selection of item 0, which reaches through AdwTabPages into
       // adw_tab_view_get_nth_page(0) on a tab view with no pages yet, and
       // trips an Adwaita assertion at window construction. The sidebar's
       // highlight follows AdwTabView; it never forces a selection of its own.
@@ -36,13 +40,10 @@ template $GhosttySidebar: Adw.Bin {
         "navigation-sidebar",
       ]
 
-      factory: Gtk.BuilderListItemFactory {
-        template Gtk.ListItem {
-          child: $GhosttySidebarRow {
-            page: bind template.item as <Adw.TabPage>;
-          };
-        }
-      };
+      // No factory here. A Gtk.BuilderListItemFactory could not build the
+      // row: blueprint derives only THIS file's class name, and naming the
+      // row class undefined is not an error, it derails the parse. The
+      // factory is a Gtk.SignalListItemFactory installed by sidebar.zig.
     }
   }
 }

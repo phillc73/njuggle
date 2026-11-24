@@ -1,0 +1,141 @@
+# Njuggle CI: fast gates on main, one release artifact per tag.
+#
+# Every job runs in the stock Debian 13 (trixie) image, which carries the
+# pinned system libraries the build needs (GTK 4.18, libadwaita 1.7,
+# blueprint-compiler 0.16, libgtk4-layer-shell). Zig is downloaded at the
+# pinned version and checked against its published sha256, so no custom
+# container definition is required.
+#
+# Cache keys carry the Zig version and the Ghostty base tag: a rebase or a
+# Zig bump starts a fresh cache instead of mixing object files.
+
+stages:
+  - test
+  - build
+  - verify
+  - release
+
+variables:
+  ZIG_VERSION: "0.17.0"
+  ZIG_TARBALL: "zig-x86_64-linux-0.17.0.tar.xz"
+  ZIG_SHA256: "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026"
+  GHOSTTY_TAG: "v1.4.0"
+  GHOSTTY_BASE: "1.4.0"
+  BLUEPRINT_VERSION: "v0.22.2"
+  ZIG_GLOBAL_CACHE_DIR: "$CI_PROJECT_DIR/.zig-global"
+  ZIG_LOCAL_CACHE_DIR: "$CI_PROJECT_DIR/.zig-cache"
+  GIT_DEPTH: "0"
+
+default:
+  image: debian:trixie
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq --no-install-recommends
+      build-essential ca-certificates curl file gettext git
+      libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
+      libxml2-utils pkg-config xz-utils
+      libegl1 libgl1 libgl1-mesa-dri libglx-mesa0
+      meson ninja-build python3 xvfb xauth fonts-dejavu-core
+    - ./ci/install-zig.sh
+    - ./ci/install-blueprint.sh
+    - export PATH="$CI_PROJECT_DIR/.ci-tools/zig:$PATH"
+
+.fast-gate-rules: &fast-gate-rules
+  - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+# Fast gate 1: the GTK-free unit suite. The test run steps carry
+# `has_side_effects` in build.zig, so a cached test step still executes; the
+# job asserts the summary reports a non-trivial pass count, which a run that
+# did nothing cannot print.
+test-units:
+  stage: test
+  rules: *fast-gate-rules
+  cache:
+    key: "zig-$ZIG_VERSION-ghostty-$GHOSTTY_TAG-units"
+    paths:
+      - .zig-cache/
+      - .zig-global/
+  script:
+    - ./ci/run-test-units.sh
+
+# Upstream Ghostty at the pinned base tag, built once per cache key and
+# handed to the parity gate as a job artifact. It carries the same glslang
+# `-O0` split the fork carries: Zig 0.17's bundled clang aborts on
+# SPIRV/doc.cpp above -O0, upstream included.
+upstream-ghostty:
+  stage: test
+  rules: *fast-gate-rules
+  cache:
+    key: "zig-$ZIG_VERSION-ghostty-$GHOSTTY_TAG-upstream"
+    paths:
+      - .zig-cache/
+      - .zig-global/
+      - .ci-tools/ghostty
+  script:
+    - ./ci/build-upstream-ghostty.sh
+  artifacts:
+    paths:
+      - .ci-tools/ghostty
+    expire_in: 1 week
+
+# Build the release binary and the install tree once per pipeline. The
+# parity gate consumes the binary; the tag job consumes the whole tree.
+build-binary:
+  stage: build
+  rules: *fast-gate-rules
+  cache:
+    key: "zig-$ZIG_VERSION-ghostty-$GHOSTTY_TAG-build"
+    paths:
+      - .zig-cache/
+      - .zig-global/
+  script:
+    - ./ci/build-binary.sh
+  artifacts:
+    paths:
+      - package/
+      - zig-out/bin/njuggle
+    expire_in: 1 week
+
+# Fast gate 2: the none-mode parity gate, invoked exactly as shipped, from a
+# plain runner environment (no PATH shims exist here). The gate needs a
+# display, so it runs under Xvfb.
+test-parity:
+  stage: verify
+  needs:
+    - job: build-binary
+      artifacts: true
+    - job: upstream-ghostty
+      artifacts: true
+  rules: *fast-gate-rules
+  script:
+    - ./ci/run-parity-gate.sh
+
+# Tag only: one ReleaseFast tarball, its measured sha256, and the release
+# entry that publishes both.
+release-artifact:
+  stage: release
+  needs:
+    - job: build-binary
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  script:
+    - ./ci/build-artifact.sh
+  artifacts:
+    paths:
+      - dist/njuggle-${CI_COMMIT_TAG}-x86_64-linux.tar.gz
+      - dist/njuggle-${CI_COMMIT_TAG}-x86_64-linux.tar.gz.sha256
+    expire_in: never
+  release:
+    tag_name: '$CI_COMMIT_TAG'
+    name: 'njuggle $CI_COMMIT_TAG'
+    description: 'njuggle $CI_COMMIT_TAG (x86_64 Linux): ReleaseFast binary, desktop entry, icons, default config and the POSIX installer, with the measured sha256.'
+    assets:
+      links:
+        - name: 'njuggle-$CI_COMMIT_TAG-x86_64-linux.tar.gz'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/dist/njuggle-$CI_COMMIT_TAG-x86_64-linux.tar.gz?job=release-artifact'
+          link_type: package
+        - name: 'sha256'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/raw/dist/njuggle-$CI_COMMIT_TAG-x86_64-linux.tar.gz.sha256?job=release-artifact'
+          link_type: other

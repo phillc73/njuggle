@@ -2,14 +2,27 @@ using Gtk 4.0;
 using Adw 1;
 
 template $GhosttySidebarRow: Adw.Bin {
-  Gtk.Box {
-    orientation: vertical;
+  // The row's box, published so the hover reveal can name it as the widget
+  // whose CSS state follows the pointer.
+  //
+  // The row is its own Gtk.Overlay (requirements, ICON-BACKFILL): the content
+  // box is the overlay's child and backfills the whole row, and the icon and
+  // the hover X sit ON the row rather than in its horizontal box. A box child
+  // takes its space from the label; an overlay child takes none. The X is on
+  // top, so while it is revealed it covers the icon it shares the corner with.
+  Gtk.Overlay row_box {
+    styles [
+      "njuggle-row",
+    ]
 
+    // The row's content, and the backfill: it carries the row's own padding so
+    // the overlay's corner is the padded corner the icon belongs in, and it
+    // fills the row's height so the top area is part of the row for hover and
+    // for the right-click menu.
     Gtk.Box {
-      orientation: horizontal;
-      spacing: 8;
-      // Breathing room. Without it the two labels collide and the list reads
-      // as a wall of text rather than a set of distinct tabs.
+      orientation: vertical;
+      hexpand: true;
+      vexpand: true;
       margin-top: 8;
       margin-bottom: 8;
       margin-start: 6;
@@ -17,87 +30,146 @@ template $GhosttySidebarRow: Adw.Bin {
       tooltip-text: bind template.page as <Adw.TabPage>.tooltip;
 
       Gtk.Box {
-        orientation: vertical;
-        spacing: 2;
+        orientation: horizontal;
+        spacing: 8;
         hexpand: true;
-        valign: center;
 
-        Gtk.Label {
-          ellipsize: end;
-          halign: start;
-          single-line-mode: true;
-          label: bind template.page as <Adw.TabPage>.title;
+        Gtk.Box {
+          orientation: vertical;
+          spacing: 2;
+          hexpand: true;
+          valign: center;
+
+          Gtk.Label {
+            ellipsize: end;
+            halign: start;
+            single-line-mode: true;
+            label: bind template.page as <Adw.TabPage>.title;
+          }
+
+          Gtk.Label {
+            ellipsize: start;
+            halign: start;
+            single-line-mode: true;
+            label: bind $computed_cwd(template.page as <Adw.TabPage>.child as <$GhosttyTab>.active-surface as <$GhosttySurface>.pwd) as <string>;
+
+            styles [
+              "caption",
+              "dim-label",
+            ]
+          }
         }
 
-        Gtk.Label {
-          ellipsize: start;
-          halign: start;
-          single-line-mode: true;
-          label: bind $computed_cwd(template.page as <Adw.TabPage>.child as <$GhosttyTab>.active-surface as <$GhosttySurface>.pwd) as <string>;
+        Gtk.GestureClick {
+          button: 3;
+          pressed => $right_click();
+        }
 
-          styles [
-            "caption",
-            "dim-label",
-          ]
+        // The status mark (running/attention/idle) stays in the horizontal
+        // box, as before: the backfill icon is the row-extent marker, not a
+        // replacement for the per-tab state. The embedded 64px textures have
+        // headroom for 24px.
+        Gtk.Image status_image {
+          pixel-size: 24;
+          valign: center;
+        }
+
+        // The row's own controllers do not see the pointer leaving onto a
+        // child, so the motion controller lives on the row BOX (the overlay
+        // root), in capture phase: it sees entering the row, moving over any
+        // child (the labels, the backfill icon, the X), and leaving. It must
+        // be a child of the OVERLAY, not of the content box: the backfill
+        // icon and the close button are overlay siblings, and a controller
+        // on the content box never sees the pointer over them.
+        Gtk.DragSource drag_source {
+          actions: move;
+          prepare => $drag_prepare();
+        }
+
+        Gtk.DropTarget drop_target {
+          actions: move;
+          drop => $row_drop();
+        }
+
+        Gtk.PopoverMenu menu {
+          menu-model: row_menu;
+          has-arrow: false;
+          halign: start;
         }
       }
 
-      Gtk.GestureClick {
-        button: 3;
-        pressed => $right_click();
-      }
-
-      Gtk.DragSource drag_source {
-        actions: move;
-        prepare => $drag_prepare();
-      }
-
-      Gtk.DropTarget drop_target {
-        actions: move;
-        drop => $row_drop();
-      }
-
-      Gtk.PopoverMenu menu {
-        menu-model: row_menu;
-        has-arrow: false;
-        halign: start;
-      }
-
-      // The status indicator sits immediately left of the close button
-      // (owner-ruled position). Every tab shows it in every state when the
-      // indicator is on; it is the only mark on the row.
-      // Sized to the close button's hover circle (a `circular` flat button is
-      // 24px and the icon inside it 16px at the standard scale), so the mark
-      // reads as a peer of the X rather than a speck beside it. The embedded
-      // 64px textures have headroom for this.
-      Gtk.Image status_image {
-        pixel-size: 24;
-        valign: center;
-      }
-
-      Gtk.Button {
-        icon-name: "window-close-symbolic";
-        tooltip-text: _("Close Tab");
-        valign: center;
-        clicked => $close_clicked();
-        // Never in the terminal's focus chain.
-        can-focus: false;
-        focus-on-click: false;
-
-        styles [
-          "flat",
-          "circular",
-        ]
+      // Second-level pane rows for a split tab, populated and kept live from
+      // Zig off SplitTree's `changed` signal (ADR: sidebar knows nothing else
+      // about Ghostty, so it reacts to the signal rather than probing state).
+      // Empty for an unsplit tab, so it contributes no height and the tab's
+      // row stays pixel-identical to before this existed.
+      Gtk.Box panes_box {
+        orientation: vertical;
       }
     }
 
-    // Second-level pane rows for a split tab, populated and kept live from
-    // Zig off SplitTree's `changed` signal (ADR: sidebar knows nothing else
-    // about Ghostty, so it reacts to the signal rather than probing state).
-    // Empty for an unsplit tab, so it contributes no height and the tab's
-    // row stays pixel-identical to before this existed.
-    Gtk.Box panes_box {
-      orientation: vertical;
+    // The backfill icon (requirements, ICON-BACKFILL): whose tab this is,
+    // right-aligned in the row's bottom-right corner. It is an overlay child,
+    // so it takes no space from the text. It paints nothing (owner UAT
+    // 2026-11-20, cell 1.1, which supersedes the "always displayed" half of
+    // the law): the stylesheet gives it a zero opacity in every state, so a
+    // resting row is its title, its working directory and the status mark. It
+    // remains in the template as the overlay sibling the X shares the corner
+    // with, and the two read one visibility source: the row's state class.
+    //
+    // The 16px request is a FLOOR, not a cap: the image is drawn at its
+    // container's size and the stylesheet may enlarge it, which is why the
+    // status mark below is a child box and not a sized image.
+    [overlay]
+    Gtk.Image backfill_image {
+      icon-name: "org.mimosadev.njuggle";
+      pixel-size: 16;
+      halign: end;
+      valign: end;
+      can-target: false;
+
+      styles [
+        "backfill",
+      ]
+    }
+
+    // The X is an edge overlay, not a child of the horizontal box (requirements
+    // R3, amended): a box child is laid out by the box and the label loses the
+    // space at rest. As an overlay it is drawn ON the row, in the corner it
+    // shares with the backfill icon, which is below it in the template and
+    // therefore under it while revealed.
+    //
+    // It keeps its accessible name and stays reachable from the keyboard
+    // (focusable through the row), and the tab remains closable from the
+    // context menu and the window's close-tab actions.
+    //
+    // Size is the stylesheet's (12px, scale-aware). There is deliberately no
+    // size-request property: a pixel request is applied as a MINIMUM
+    // in logical pixels and GTK's own button minimum (~32px) wins over it,
+    // which is what put the X where the desktop report saw it.
+    [overlay]
+    Gtk.Button close_button {
+      icon-name: "window-close-symbolic";
+      tooltip-text: _("Close Tab");
+      accessible-role: button;
+      halign: end;
+      valign: end;
+      clicked => $close_clicked();
+      can-focus: true;
+      focus-on-click: false;
+
+      styles [
+        "flat",
+        "circular",
+        "njuggle-row-close",
+      ]
+    }
+
+    Gtk.EventControllerMotion {
+      propagation-phase: capture;
+      enter => $hover_enter();
+      motion => $hover_enter();
+      leave => $hover_leave();
     }
   }
 }

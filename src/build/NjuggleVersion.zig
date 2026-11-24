@@ -131,7 +131,8 @@ test "describe: the base never becomes the version digits" {
     try testing.expect(std.mem.startsWith(u8, v, "0.1.0"));
 }
 
-test "describe: a later base does not move the version" {    var a_buf: [64]u8 = undefined;
+test "describe: a later base does not move the version" {
+    var a_buf: [64]u8 = undefined;
     var b_buf: [64]u8 = undefined;
 
     const a = try std.fmt.bufPrint(&a_buf, "{s}+{s}", .{ "0.1.0", "ghostty.1.4.0" });

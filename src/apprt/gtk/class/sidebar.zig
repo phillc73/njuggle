@@ -209,9 +209,57 @@ pub const Sidebar = extern struct {
         header_factory.unref();
     }
 
+    /// The row factory, installed once. Blueprint cannot name the row class
+    /// here, so the row is built in code: setup makes the GhosttySidebarRow,
+    /// bind points it at the item, unbind clears the page before the item can
+    /// be recycled.
+    fn installRowFactory(self: *Self) void {
+        const priv = self.private();
+
+        const row_factory = gtk.SignalListItemFactory.new();
+        _ = gtk.SignalListItemFactory.signals.setup.connect(row_factory, *Self, rowSetup, self, .{});
+        _ = gtk.SignalListItemFactory.signals.bind.connect(row_factory, *Self, rowBind, self, .{});
+        _ = gtk.SignalListItemFactory.signals.unbind.connect(row_factory, *Self, rowUnbind, self, .{});
+        // set_factory is transfer-none: it takes its own ref.
+        priv.view.setFactory(row_factory.as(gtk.ListItemFactory));
+        row_factory.unref();
+    }
+
+    /// First time a row item is created: build the row. The page is bound in
+    /// `rowBind`, where the item is actually set: `getItem()` is null during
+    /// setup, so a page set here leaves every row pointing at nothing (the
+    /// close action then silently no-ops).
+    fn rowSetup(_: *gtk.SignalListItemFactory, object: *gobject.Object, _: *Self) callconv(.c) void {
+        const item = gobject.ext.cast(gtk.ListItem, object) orelse return;
+        const row = gobject.ext.newInstance(SidebarRow, .{});
+        item.setChild(row.as(gtk.Widget));
+    }
+
+    /// A row is about to represent an item: point it at the tab page.
+    fn rowBind(_: *gtk.SignalListItemFactory, object: *gobject.Object, _: *Self) callconv(.c) void {
+        const item = gobject.ext.cast(gtk.ListItem, object) orelse return;
+        const child = item.getChild() orelse return;
+        const row = gobject.ext.cast(SidebarRow, child) orelse return;
+        const page = item.getItem() orelse {
+            row.setPage(null);
+            return;
+        };
+        row.setPage(gobject.ext.cast(adw.TabPage, page));
+    }
+
+    /// The row is leaving its item: clear the page so a recycled row never
+    /// shows or acts on the previous tab.
+    fn rowUnbind(_: *gtk.SignalListItemFactory, object: *gobject.Object, _: *Self) callconv(.c) void {
+        const item = gobject.ext.cast(gtk.ListItem, object) orelse return;
+        const child = item.getChild() orelse return;
+        const row = gobject.ext.cast(SidebarRow, child) orelse return;
+        row.setPage(null);
+    }
+
     /// Point the sidebar at a tab view. Called once, by the window.
     pub fn setTabView(self: *Self, tab_view: *adw.TabView) void {
         const priv = self.private();
+        self.installRowFactory();
         priv.tab_view = tab_view;
 
         self.rebuildSortModel();
@@ -264,7 +312,7 @@ pub const Sidebar = extern struct {
 
     fn castPage(p: ?*const anyopaque) ?*adw.TabPage {
         const raw = p orelse return null;
-        const obj: *gobject.Object = @ptrCast(@constCast(@alignCast(raw)));
+        const obj: *gobject.Object = @ptrCast(@alignCast(@constCast(raw)));
         return gobject.ext.cast(adw.TabPage, obj);
     }
 
@@ -573,6 +621,9 @@ pub const Sidebar = extern struct {
     /// dedicated accelerator — `win.focus-sidebar` — routes here instead. The
     /// cursor is parked on the row that mirrors the live tab, so Up/Down move
     /// relative to where the user actually is rather than from the list's top.
+    /// The divider's drag affordance. The window owns the drag gesture and
+    /// knows the boundary, so it draws the affordance itself; this class
+    /// carries no affordance widget.
     pub fn focusList(self: *Self) void {
         const priv = self.private();
 

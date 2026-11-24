@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  njuggle - the sidebar divider's drag affordance.
+  AGPLv3. Two parallel vertical lines with small arrows on either side, drawn
+  in the band around the sidebar boundary (requirements, DRAG AFFORDANCE).
+  Monochrome, so the symbolic icon recolours to the theme's foreground.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="36" viewBox="0 0 16 36">
+  <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <line x1="6" y1="9" x2="6" y2="27"/>
+    <line x1="10" y1="9" x2="10" y2="27"/>
+    <path d="M4 18 L1.5 18 M2.6 16.9 L1.5 18 L2.6 19.1"/>
+    <path d="M12 18 L14.5 18 M13.4 16.9 L14.5 18 L13.4 19.1"/>
+  </g>
+</svg>

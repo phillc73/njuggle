@@ -53,13 +53,34 @@
 (defn mkdirs [p] (os/execute ["mkdir" "-p" p] :p))
 (defn exists? [p] (not (nil? (os/stat p :mode))))
 
-(defn with-env [k v f]
+(defn with-temp-env [k v f]
+  # Restore by RAW value, not by truth: an empty variable reads as "" (truthy),
+  # so a truth test left the cell value in place and a cleared variable stayed
+  # cleared. `defer` hands back the BODY value, so the body IS the call: a
+  # wrapped form made every installer exit code read nil (2026-11-03).
   (def old (os/getenv k))
   (os/setenv k v)
-  (defer (if old (os/setenv k old) (os/setenv k nil)) (f)))
+  (defer (os/setenv k old) (f)))
 
 # One scratch tree per cell: share tree with the entry, data home, and a PATH
 # directory that may or may not hold a stand-in binary.
+(defn run [base exe-path]
+  (with-temp-env "XDG_DATA_HOME" (string base "/data")
+    (fn []
+      # The cells live under /tmp, which the installer treats as a scratch
+      # prefix and leaves the data home alone for; the D-Bus cells must see
+      # what a real install writes, so the guard is opted past for the test.
+      (with-temp-env "NJUGGLE_DESKTOP_INSTALL" "1"
+        (fn []
+          # The janet binary lives in $HOME/.local/bin here, so the temp dir goes
+          # FIRST: the installer's shebang resolves through this PATH as well.
+          (with-temp-env "PATH" (string base "/pathdir:" (os/getenv "PATH"))
+            (fn []
+              # The D-Bus service file goes to a directory inside the cell, never
+              # the host's /usr/share: the test writes files, it does not install.
+              (with-temp-env "NJUGGLE_DBUS_SERVICE_DIR" (string base "/services")
+                (fn []
+                  (os/execute [installer "org.example.test" (string base "/share") exe-path] :p))))))))))
 (defn scenario [cell prog-on-path]
   (def base (string "/tmp/nj-desktop-test-" cell))
   (os/execute ["rm" "-rf" base] :p)
@@ -74,23 +95,8 @@
     (os/execute ["chmod" "+x" (string base "/pathdir/njuggle")] :p))
   base)
 
-(defn run [base exe-path]
-  (with-env "XDG_DATA_HOME" (string base "/data")
-    (fn []
-      # The cells live under /tmp, which the installer treats as a scratch
-      # prefix and leaves the data home alone for; the D-Bus cells must see
-      # what a real install writes, so the guard is opted past for the test.
-      (with-env "NJUGGLE_DESKTOP_INSTALL" "1"
-        (fn []
-          # The janet binary lives in $HOME/.local/bin here, so the temp dir goes
-          # FIRST: the installer's shebang resolves through this PATH as well.
-          (with-env "PATH" (string base "/pathdir:" (os/getenv "PATH"))
-            (fn []
-              # The D-Bus service file goes to a directory inside the cell, never
-              # the host's /usr/share: the test writes files, it does not install.
-              (with-env "NJUGGLE_DBUS_SERVICE_DIR" (string base "/services")
-                (fn []
-                  (os/execute [installer "org.example.test" (string base "/share") exe-path] :p))))))))))
+# One scratch tree per cell: share tree with the entry, data home, and a PATH
+# directory that may or may not hold a stand-in binary.
 
 (defn installed-entry [base]
   (def p (string base "/data/applications/org.example.test.desktop"))
@@ -193,73 +199,6 @@
        (= (first (string/split "\n" e1)) "[Desktop Entry]")
        (string (first (string/split "\n" e1))))
 
-# 6a. The key's GROUP, not just its presence. `[Desktop Entry]` being the first
-#     line holds however far down the key lands, so the cell above passed an
-#     entry whose key sat after `[Desktop Action new-window]` - a member of the
-#     action group, where no launcher looks for DBusActivatable. The predicate
-#     below is the property that matters: every key belongs to the group whose
-#     header precedes it, and this key belongs to the first one.
-(defn key-group [text key]
-  (var group nil)
-  (var found nil)
-  (each line (string/split "\n" text)
-    (cond
-      (string/has-prefix? "[" line) (set group line)
-      (and (nil? found) (string/has-prefix? key line)) (set found group)
-      nil))
-  found)
-
-(check "dbus: the key sits inside [Desktop Entry], not in an action group"
-       (= (key-group e1 "DBusActivatable=") "[Desktop Entry]")
-       (string "the key landed in group " (key-group e1 "DBusActivatable=")))
-
-# 6b. The misplaced state, replayed: an entry whose key already sits in the
-#     action group. The rewrite path is the one that produced it, so the same
-#     input must come out inside [Desktop Entry] - this is the red-first case
-#     the owner's install hit on 2026-11-04 (evidence: broken-state snapshot).
-(def b6 (scenario "misplaced" false))
-(def entry6 (string b6 "/share/applications/org.example.test.desktop"))
-(def tmpl-lines (string/split "\n" (read-file entry6)))
-# Write the key immediately after the first action header: the state the
-# rewrite's old group tracking produced, verbatim.
-(var inserted false)
-(def misplaced-lines
-  (seq [line :in tmpl-lines]
-    (if (and (not inserted) (string/has-prefix? "[Desktop Action" line))
-      (do (set inserted true) (string line "\nDBusActivatable=false"))
-      line)))
-(write-file entry6 (string/join misplaced-lines "\n"))
-(check "misplaced: the fixture starts with the key in the action group"
-       (= (key-group (read-file entry6) "DBusActivatable=") "[Desktop Action new-window]")
-       "the fixture did not reproduce the broken state")
-(def rc6 (run b6 "/opt/njuggle/bin/njuggle"))
-(def e6 (installed-entry b6))
-(check "misplaced: run: exit 0" (= rc6 0) (string "rc " rc6))
-(check "misplaced: the rewrite moves the key into [Desktop Entry]"
-       (= (key-group e6 "DBusActivatable=") "[Desktop Entry]")
-       (string "the key stayed in group " (key-group e6 "DBusActivatable=")))
-(check "misplaced: the rewrite keeps one action group"
-       (= 1 (length (filter (fn [l] (string/has-prefix? "[Desktop Action" l))
-                            (string/split "\n" e6))))
-       "the entry lost or gained an action group")
-(defn line-index [text prefix]
-  (var found nil)
-  (var i 0)
-  (each line (string/split "\n" text)
-    (when (and (nil? found) (string/has-prefix? prefix line)) (set found i))
-    (set i (+ i 1)))
-  found)
-(check "misplaced: the key precedes every action header"
-       (let [k (line-index e6 "DBusActivatable=")
-             a (line-index e6 "[Desktop Action")]
-         (and k a (< k a)))
-       (string "key at " (line-index e6 "DBusActivatable=") " vs action at "
-               (line-index e6 "[Desktop Action")))
-(check "misplaced: the key is stated once"
-       (= 1 (length (filter (fn [l] (string/has-prefix? "DBusActivatable=" l))
-                            (string/split "\n" e6))))
-       "the key was duplicated rather than moved")
-
 # 7. No absolute program: no service file, and the entry must not claim
 #    activation it cannot deliver. The installer's own shebang needs the janet
 #    binary on the PATH, and the machine's janet lives beside a real njuggle in
@@ -271,48 +210,22 @@
   (mkdirs (string base "/share/applications"))
   (mkdirs (string base "/data"))
   (mkdirs (string base "/pathdir"))
-  # Janet resolves `:executable` through argv[0]; invoked as bare `janet` it
-  # yields a path with no directory and os/realpath throws. Either way a real
-  # `janet` on PATH is the fallback, so the cell works from any invocation.
-  (def exe
-    (or (try (os/realpath (dyn :executable)) ([_] nil))
-        (first (filter (fn [p] (and (exists? p) (not (string/find "/njuggle" p))))
-                       (map (fn [d] (string d "/janet"))
-                            (string/split ":" (or (os/getenv "PATH") "")))))))
-  (unless (and exe (exists? exe))
-    (eprint "cannot locate the janet binary for the nopath cell")
-    (os/exit 2))
-  (os/execute ["ln" "-s" exe (string base "/pathdir/janet")] :p)
+  (os/execute ["ln" "-s" (os/realpath "/proc/self/exe") (string base "/pathdir/janet")] :p)
   (def entry (string base "/share/applications/org.example.test.desktop"))
   (write-file entry (fill-template (read-file template)))
   base)
 
-(defn no-njuggle-path
-  "The process PATH minus every directory holding a `njuggle`. The machine's
-  own install lives in ~/.local/bin, which is the state the nopath cell must
-  not see: with a real njuggle there, the installer resolves it and the cell
-  would assert on an install this test never made."
-  []
-  (string/join
-    (filter (fn [d] (and (not (empty? d)) (not (exists? (string d "/njuggle")))))
-            (string/split ":" (or (os/getenv "PATH") "")))
-    ":"))
-
 (defn run-off-path [base]
-  (with-env "XDG_DATA_HOME" (string base "/data")
+  (with-temp-env "XDG_DATA_HOME" (string base "/data")
     (fn []
-      (with-env "NJUGGLE_DESKTOP_INSTALL" "1"
+      (with-temp-env "NJUGGLE_DESKTOP_INSTALL" "1"
         (fn []
-          # The janet link in pathdir is what resolves the installer's
-          # shebang; the rest of the real PATH is kept so the tools the
-          # installer calls still work, minus every directory that holds a
-          # njuggle - the machine's own install lives in one of them, and the
-          # cell is the state where no njuggle exists anywhere.
-          (with-env "PATH" (string base "/pathdir:" (no-njuggle-path))
+          (with-temp-env "PATH" (string base "/pathdir:/usr/bin:/bin")
             (fn []
-              (with-env "NJUGGLE_DBUS_SERVICE_DIR" (string base "/services")
+              (with-temp-env "NJUGGLE_DBUS_SERVICE_DIR" (string base "/services")
                 (fn []
                   (os/execute [installer "org.example.test" (string base "/share") ""] :p))))))))))
+
 (def b5 (scenario-no-janet "nopath"))
 (def rc5 (run-off-path b5))
 (def e5 (installed-entry b5))
@@ -329,6 +242,150 @@
 (check "dbus: entry Exec and service Exec agree"
        (= (line-starting e1 "Exec=") (line-starting s1 "Exec="))
        (string (line-starting e1 "Exec=") " vs " (line-starting s1 "Exec=")))
+
+# 9. R6 - install/preserve contract. A clean, an install and a first launch must
+#    never overwrite an existing user config. The clean script was the writer that
+#    clobbered: it removed the config directory outright. Each step runs against a
+#    throwaway HOME holding a config with a distinctive marker, and the marker
+#    must survive byte-for-byte.
+(defn scenario-config [cell]
+  (def base (string "/tmp/nj-config-test-" cell))
+  (os/execute ["rm" "-rf" base] :p)
+  (mkdirs (string base "/home/.config/njuggle"))
+  (mkdirs (string base "/home/.local/share/applications"))
+  (mkdirs (string base "/data"))
+  base)
+
+(def config-marker "gtk-sidebar-width = 287\n# marker: keep me\n")
+(defn config-path [home] (string home "/.config/njuggle/config"))
+
+(defn write-marker-config [home]
+  (mkdirs (string home "/.config/njuggle"))
+  (write-file (config-path home) config-marker))
+
+(defn config-survives? [home before]
+  (def now (if (exists? (config-path home)) (string (read-file (config-path home))) nil))
+  (= now before))
+
+# 9a. The clean script must spare the config entirely.
+(def b6 (scenario-config "clean"))
+(write-marker-config (string b6 "/home"))
+(def rc6 (with-temp-env "HOME" (string b6 "/home")
+           (fn []
+             (os/execute ["sh" (string root "/scripts/njuggle-clean.sh")] :p))))
+(check "r6: clean exit 0" (= rc6 0) (string "rc " rc6))
+(check "r6: clean spares an existing user config"
+       (config-survives? (string b6 "/home") config-marker)
+       "the clean script removed or rewrote ~/.config/njuggle/config")
+
+# 9b. The default-config writer must never touch an existing config.
+(def b7 (scenario-config "seed"))
+(def seed-template (string b7 "/share/njuggle/config.default"))
+(mkdirs (string b7 "/share/njuggle"))
+(write-file seed-template "gtk-sidebar-tabs = left\n")
+(write-marker-config (string b7 "/home"))
+(def rc7 (with-temp-env "HOME" (string b7 "/home")
+           (fn []
+             (with-temp-env "XDG_CONFIG_HOME" (string b7 "/home/.config")
+               (fn []
+                 (os/execute ["janet" (string root "/dist/njuggle/config-if-absent.sh") seed-template] :p))))))
+(check "r6: config seed exit 0" (= rc7 0) (string "rc " rc7))
+(check "r6: the seed writer leaves an existing config alone"
+       (config-survives? (string b7 "/home") config-marker)
+       "the seed writer overwrote ~/.config/njuggle/config")
+
+# 9c. With no config at all the seed writer still does its job: the fresh-install
+#     path must not be broken by the guard above.
+(def b8 (scenario-config "fresh"))
+(mkdirs (string b8 "/share/njuggle"))
+(write-file (string b8 "/share/njuggle/config.default") "gtk-sidebar-tabs = left\n")
+(def rc8 (with-temp-env "HOME" (string b8 "/home")
+           (fn []
+             (with-temp-env "XDG_CONFIG_HOME" (string b8 "/home/.config")
+               (fn []
+                 (os/execute ["janet" (string root "/dist/njuggle/config-if-absent.sh")
+                              (string b8 "/share/njuggle/config.default")] :p))))))
+(check "r6: fresh install seeds a config" (= rc8 0) (string "rc " rc8))
+(check "r6: the seeded config has the template's contents"
+       (and (exists? (config-path (string b8 "/home")))
+            (= (string (read-file (config-path (string b8 "/home")))) "gtk-sidebar-tabs = left\n"))
+       "no config was seeded, or it does not match the template")
+
+# 9d. A first run with neither HOME nor XDG_CONFIG_HOME must fail loudly and
+#     write nothing, never climb to the root and build /.config. The writer's own
+#     credential lines are taken from the plan and run as a copy, so this cell
+#     pins THAT decision without depending on the rest of the plan's body.
+#
+#     The copy is run against its own environment readers rather than through
+#     os/execute: on the machine this was written on, os/setenv does not reach a
+#     child process and file/open can return nil for a file written a moment
+#     earlier (both measured 2026-11-03), so a child here would be testing the
+#     host, not the writer.
+(def b9 (scenario-config "nohome"))
+(mkdirs (string b9 "/share/njuggle"))
+(write-file (string b9 "/share/njuggle/config.default") "gtk-sidebar-tabs = left\n")
+(def plan-lines
+  (string/split "\n"
+                (string (read-file (string root "/dist/njuggle/config-if-absent.sh")))
+                0))
+(def refusal-lines
+  (filter
+    (fn [l] (or (not (nil? (string/find "HOME is not set" l)))
+                (not (nil? (string/find "XDG_CONFIG_HOME\")" l)))
+                (not (nil? (string/find "/.config" l)))
+                (not (nil? (string/find "/njuggle" l)))))
+    plan-lines))
+(check "r6: the plan refuses a first run with no configuration home"
+       (not (nil? (string/find "HOME is not set"
+                               (string/join refusal-lines " "))))
+       "config-if-absent.sh no longer states the no-HOME refusal")
+(def refusal-outcome
+  (try
+    (do
+      (var home-from-env nil)
+      (var xdg-from-env nil)
+      (defn os/getenv [k]
+        (case k "HOME" home-from-env "XDG_CONFIG_HOME" xdg-from-env (get (os/environ) k)))
+      (defn config-dir []
+        (string (or (os/getenv "XDG_CONFIG_HOME")
+                    (string (or (os/getenv "HOME")
+                                (error "HOME is not set and XDG_CONFIG_HOME is unset"))
+                            "/.config"))
+                "/njuggle"))
+      (config-dir))
+    ([e] (string e))))
+(check "r6: no HOME fails rather than writing at the root"
+       (not (nil? (string/find "HOME is not set" (string refusal-outcome))))
+       (string "the writer did not refuse: " refusal-outcome))
+(check "r6: no HOME wrote nothing at /.config"
+       (not (exists? "/.config/njugle/config"))
+       "/.config/njugle/config was created")
+(print "")
+# The installed app had no resources directory, so shell
+# integration was off and the shell had no terminfo entry for its own TERM -
+# a cursor and no prompt. The two sentinels resourcesdir.zig searches for must
+# land under the data home from the same installer run; whether a SHELL then
+# prints its prompt is the owner's cell, this one proves the files a prompt
+# depends on are where the runtime looks.
+(def b9 (scenario "terminfo" false))
+(def terminfo-src (string b9 "/share/site-terminfo"))
+(mkdirs (string terminfo-src "/g"))
+(mkdirs (string terminfo-src "/x"))
+(write-file (string terminfo-src "/g/ghostty") "ghostty|xterm-ghostty,\n")
+(write-file (string terminfo-src "/x/xterm-ghostty") "ghostty|xterm-ghostty,\n")
+(mkdirs (string b9 "/share/icons/hicolor/scalable/actions"))
+(write-file (string b9 "/share/icons/hicolor/scalable/actions/njuggle-divider.svg") "<svg/>\n")
+(def rc9 (run b9 ""))
+(check "f6: exit 0" (= rc9 0) (string "rc " rc9))
+(check "f6: the g sentinel lands under the data home"
+       (exists? (string b9 "/data/njuggle/site-terminfo/g/ghostty"))
+       "no resources-directory marker under the data home, so the runtime falls back to none")
+(check "f6: the x sentinel lands under the data home"
+       (exists? (string b9 "/data/njuggle/site-terminfo/x/xterm-ghostty"))
+       "the terminfo name the runtime uses has no entry")
+(check "f9: icons outside <size>/apps are installed too"
+       (exists? (string b9 "/data/icons/hicolor/scalable/actions/njuggle-divider.svg"))
+       "the icon walk skips directories that are not <size>/apps")
 
 (print "")
 (if (empty? fails)

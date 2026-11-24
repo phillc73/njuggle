@@ -47,9 +47,15 @@ const GlobalShortcuts = @import("global_shortcuts.zig").GlobalShortcuts;
 const OpenURI = @import("../portal.zig").OpenURI;
 const media = @import("../media.zig");
 const Overrides = @import("Overrides.zig");
-const activation = @import("activation_decision.zig");
 
 const log = std.log.scoped(.gtk_ghostty_application);
+
+/// Whether the launch policy asks for a window right away. Kept a plain
+/// function so the rule is one place: a launch that opens a window calls this
+/// once, and every reader of "should there be a window" agrees with it.
+fn initial_window_allowed(config: *const CoreConfig) bool {
+    return config.@"initial-window";
+}
 
 extern "c" fn setenv(name: ?[*]const u8, value: ?[*]const u8, overwrite: c_int) c_int;
 
@@ -191,16 +197,30 @@ pub const Application = extern struct {
         /// window.
         requested_window: bool = false,
 
-        /// Set when an activation has queued a window request, cleared when
-        /// the event loop has created the window it asked for. An activation
-        /// that arrives in that gap - the close/relaunch handover - presents
-        /// the window on its way instead of queuing a second one.
+        /// True between asking for a window and building it. A launcher
+        /// activation can arrive while the launch's own window is still a
+        /// queued request rather than a widget, and without this the two
+        /// requests both queue a window (the double window on a menu launch).
         window_request_pending: bool = false,
+
+        /// Set when an activation was answered by presenting an existing
+        /// window, and cleared by a short timeout. A close inside the claim
+        /// window claims it (see `claimActivationGrace`): the click and the
+        /// close were one action, and the click asked for a window.
+        activation_grace: bool = false,
+
+        /// The timeout that clears `activation_grace`.
+        activation_grace_source: ?c_uint = null,
 
         /// This is set to false internally when the event loop
         /// should exit and the application should quit. This must
         /// only be set by the main loop thread.
         running: bool = false,
+
+        /// True once a quit action began the settle-aware teardown. A window
+        /// whose close had to wait for its startup reads it to end the run
+        /// loop when the deferred destroy completes.
+        quitting: bool = false,
 
         /// True once we've told systemd that startup is complete. Reloads
         /// before then (e.g. syncing the color scheme during startup) must
@@ -548,12 +568,24 @@ pub const Application = extern struct {
         // a window).
         //
         // https://gitlab.gnome.org/GNOME/glib/-/blob/bd2ccc2f69ecfd78ca3f34ab59e42e2b462bad65/gio/gapplication.c#L2302
+        //
+        // A forwarded launch (a launcher click reaching the running app) has
+        // already been activated by the time it gets here; activating again
+        // opened the second window the owner reported. This bare activate
+        // therefore belongs to our own launch only.
+        //
+        // The test is `getIsRemote`, not the dbus object path: the path
+        // asserts that the application is registered, and it is not yet at
+        // this point - asking for it there raised a GLib CRITICAL on every
+        // `none`-mode launch (caught by the parity gate). `getIsRemote` is
+        // defined for an application that has not registered.
         const priv = self.private();
+        if (self.as(gio.Application).getIsRemote() == 0 and
+            initial_window_allowed(priv.config.get()))
         {
             // We need to scope any config access because once we run our
             // event loop, this can change out from underneath us.
-            const config = priv.config.get();
-            if (config.@"initial-window") self.as(gio.Application).activate();
+            self.as(gio.Application).activate();
         }
 
         // If we are NOT the primary instance, then we never want to run.
@@ -665,15 +697,20 @@ pub const Application = extern struct {
     }
 
     fn quitNow(self: *Self) void {
-        // Get all our windows and destroy them, forcing them to free.
+        const priv = self.private();
+        priv.quitting = true;
+
+        // Get all our windows and close them through the settle-aware
+        // teardown, forcing them to free.
+        var deferred = false;
         const list = gtk.Window.listToplevels();
         defer list.free();
         list.foreach(struct {
-            fn callback(data: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+            fn callback(data: ?*anyopaque, ud: ?*anyopaque) callconv(.c) void {
                 const ptr = data orelse return;
                 const window: *gtk.Window = @ptrCast(@alignCast(ptr));
 
-                // We only want to destroy our windows. These windows own
+                // We only want to close our windows. These windows own
                 // every other type of window that is possible so this will
                 // trigger a proper shutdown sequence.
                 //
@@ -683,12 +720,27 @@ pub const Application = extern struct {
                 // tries to free on its own. I think this is probably a bug in
                 // the fcitx ime widget but still, we don't want a double free!
                 if (gobject.ext.isA(window, Window)) {
-                    window.destroy();
+                    const own: *Window = @ptrCast(@alignCast(window));
+                    const flag: *bool = @ptrCast(@alignCast(ud orelse return));
+                    if (own.closeForQuit()) flag.* = true;
                 }
             }
-        }.callback, null);
+        }.callback, @ptrCast(&deferred));
 
-        // Trigger our runloop exit.
+        // Every window's teardown ran inline: exit now. A deferred window
+        // keeps the loop alive until its surface settles; its tick ends the
+        // loop then, bounded by the close's own 10s fallback.
+        if (!deferred) priv.running = false;
+    }
+
+    /// Whether a quit action has begun the application teardown.
+    pub fn isQuitting(self: *Self) bool {
+        return self.private().quitting;
+    }
+
+    /// End the run loop after a deferred quit teardown destroyed its last
+    /// window. Only the window's settle tick calls it, once the window is gone.
+    pub fn finishQuit(self: *Self) void {
         self.private().running = false;
     }
 
@@ -1293,9 +1345,9 @@ pub const Application = extern struct {
         }
 
         // The sidebar resize gesture. Same shape and same reason as the two
-        // above: a GTK-local accelerator, not a core `keybind =` line.
-        // `<Ctrl><Shift>r` is unbound in upstream's default keybinds, and the
-        // gesture is inert in `none` mode by its own guard.
+        // above: a GTK-local accelerator rather than a core `keybind =`
+        // line. `<Ctrl><Shift>r` is unbound in upstream's default keybinds,
+        // and the gesture is inert in `none` mode by its own guard.
         {
             const gtk_app = self.as(gtk.Application);
             if (self.private().config.get().@"gtk-sidebar-tabs" != .none) {
@@ -1619,49 +1671,199 @@ pub const Application = extern struct {
     fn activate(self: *Self) callconv(.c) void {
         log.debug("activate", .{});
 
-        // A window is opened only when the application has none and none is
-        // on its way. An activation is forwarded from every launcher route,
-        // and at a close/relaunch handover two arrive before the first window
-        // exists - each one queued a new window, which is the two-window
-        // report. The in-flight flag closes that gap: it is set when this
-        // handler queues a request and cleared when the loop creates the
-        // window (newWindow, below).
+        // A forwarded activation - the launcher's click or a menu entry
+        // reaching the running instance - is meant to bring the windows the
+        // user already has forward. Queueing a new window there opened the
+        // second window the owner reported on the menu route while the
+        // command line opened one: same binary, same bus, one process.
+        //
+        // A window is queued only when the application has none AND no
+        // request is already in flight. The second condition is the one the
+        // D-Bus route needs: the bus starts the application and forwards the
+        // activation to it, which arrives in the first loop iteration while
+        // the launch's own window is still a queued request, not yet a
+        // widget. Without it both requests build a window.
         const priv = self.private();
-        // GLib's window list is a bare pointer that is NULL when empty, so a
-        // non-null list is what says a window exists. The list belongs to the
-        // application: freeing it here was a double free (the container is
-        // released with the application's own state, and the abort surfaced on
-        // the second activation).
-        const windows = self.as(gtk.Application).getWindows();
-        const any_window = @intFromPtr(windows) != 0;
-        log.debug("activate: window_exists={} pending={}", .{
-            any_window,
-            priv.window_request_pending,
-        });
-        switch (activation.decide(.{
-            .window_exists = any_window,
-            .window_pending = priv.window_request_pending,
-        })) {
-            .open => {
+        const win = self.activeWindow();
+        // A stay-alive close hides the last window. An activation
+        // must bring that same window back: the session it carries is the
+        // reason the application stayed alive.
+        if (win == null) {
+            if (self.hiddenWindow()) |hidden| {
+                gtk.Window.present(hidden);
+                if (gobject.ext.cast(Window, hidden.as(gobject.Object))) |window| {
+                    if (window.getActiveSurface()) |surface| surface.grabFocus();
+                }
+                self.armActivationGrace();
+            } else if (!priv.window_request_pending) {
                 priv.window_request_pending = true;
                 _ = priv.core_app.mailbox.push(global.io(), .{
                     .new_window = .{},
                 }, .{ .forever = {} });
-            },
-            .present => {},
+            }
+        } else {
+            // The window is presented, not created. The click still asked
+            // for a window, and a close that follows it within the claim
+            // window (the shell exited, or the user closed the window at the
+            // same moment) would leave the application with none: the
+            // activation would be swallowed by a close it never saw.
+            self.armActivationGrace();
         }
 
         // Call the parent activate method. GApplication's default handler
-        // raises the application's windows: on a forwarded activation that is
-        // what brings the existing window forward, since nothing is queued.
+        // does the raising: without it a forwarded activation would be
+        // silent, and a launch would open its window behind nothing.
         gio.Application.virtual_methods.activate.call(
             Class.parent,
             self.as(Parent),
         );
     }
 
+    /// A window this application already shows, if any. The toolkit's own
+    /// active-window answer is tried first; the toplevel list is the fallback
+    /// for a window that exists but is not active (unfocused, minimised, or
+    /// raised by another window manager). Derived windows - tooltips,
+    /// popovers, dialogs - report a transient parent and are skipped, so a
+    /// dialog left open is not mistaken for the application's window.
+    ///
+    /// A window in its close path is not a window for the purpose of this
+    /// answer: it is still a mapped toplevel while the close request unwinds,
+    /// and presenting it is presenting something that is about to go away.
+    fn activeWindow(self: *Self) ?*gtk.Window {
+        if (self.as(gtk.Application).getActiveWindow()) |win| {
+            if (!isClosing(win) and win.as(gtk.Widget).getVisible() != 0) return win;
+        }
+
+        const list = gtk.Window.listToplevels();
+        defer list.free();
+        return ext.listFind(gtk.Window, list, struct {
+            fn find(win: *gtk.Window) bool {
+                if (win.as(gtk.Widget).getVisible() == 0) return false;
+                if (isClosing(win)) return false;
+                return win.getTransientFor() == null;
+            }
+        }.find);
+    }
+
+    /// Whether a toplevel is one of ours and has entered its close path.
+    /// Toplevels of other types (a dialog, a toolkit helper) are never
+    /// closing windows in this sense.
+    fn isClosing(win: *gtk.Window) bool {
+        const self_win = gobject.ext.cast(Window, win.as(gobject.Object)) orelse return false;
+        return self_win.isClosing();
+    }
+
+    /// A window of ours that exists but is not visible: the state a
+    /// stay-alive close leaves behind. Derived and closing windows
+    /// are skipped, matching `activeWindow`.
+    fn hiddenWindow(_: *Self) ?*gtk.Window {
+        const list = gtk.Window.listToplevels();
+        defer list.free();
+        return ext.listFind(gtk.Window, list, struct {
+            fn find(win: *gtk.Window) bool {
+                if (win.as(gtk.Widget).getVisible() != 0) return false;
+                if (isClosing(win)) return false;
+                if (win.getTransientFor() != null) return false;
+                const self_win = gobject.ext.cast(Window, win.as(gobject.Object)) orelse return false;
+                // The quick terminal hides itself by design; it is not a
+                // parked session to re-show on an ordinary activation.
+                return !self_win.isQuickTerminal();
+            }
+        }.find);
+    }
+
+    /// How many windows this application owns. The stay-alive close guard
+    /// reads it to answer "is this the last one?".
+    pub fn windowCount(self: *Self) usize {
+        var n: usize = 0;
+        const head: ?*glib.List = self.as(gtk.Application).getWindows();
+        var item = head;
+        while (item) |v| : (item = v.f_next) {
+            if (v.f_data != null) n += 1;
+        }
+        return n;
+    }
+
+    /// Consume an activation claim for a close that is one user action with
+    /// it. A stay-alive close then keeps the window on screen instead of
+    /// hiding it and waiting for a re-show.
+    pub fn consumeActivationGrace(self: *Self) bool {
+        const priv = self.private();
+        if (!priv.activation_grace) return false;
+        priv.activation_grace = false;
+        if (priv.activation_grace_source) |source| {
+            if (glib.Source.remove(source) == 0) {
+                log.warn("unable to remove activation grace source", .{});
+            }
+            priv.activation_grace_source = null;
+        }
+        return true;
+    }
+
+    /// Mark that an activation was answered by an existing window. The claim
+    /// lasts `activation_grace_ms`: the span in which a launcher click and a
+    /// window close are the same user action. Two D-Bus calls from one click
+    /// and one close are delivered milliseconds apart, so a batch-scoped
+    /// claim would be cleared before the close arrived.
+    fn armActivationGrace(self: *Self) void {
+        const priv = self.private();
+        priv.activation_grace = true;
+        if (priv.activation_grace_source) |source| _ = glib.Source.remove(source);
+        priv.activation_grace_source = glib.timeoutAdd(
+            activation_grace_ms,
+            activationGraceClear,
+            self,
+        );
+    }
+
+    /// How long a presented-window activation claims the next window. The
+    /// probe that found the lost activation sends the close and the launcher
+    /// activation as two calls; they arrive within a few milliseconds.
+    const activation_grace_ms: c_uint = 250;
+
+    fn activationGraceClear(ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(ud orelse return 0));
+        const priv = self.private();
+        priv.activation_grace_source = null;
+        priv.activation_grace = false;
+        return 0;
+    }
+
+    /// A window is closing. If an activation was answered inside the claim
+    /// window and this close leaves the application with no window, honour
+    /// the click and queue the window it asked for. Called from the window's
+    /// close path before the toolkit destroy, so the count still includes
+    /// this window.
+    pub fn claimActivationGrace(self: *Application) void {
+        const priv = self.private();
+        if (!priv.activation_grace) return;
+
+        // With another window left, the close was not the user's only window
+        // going away and there is nothing to reopen.
+        var windows: usize = 0;
+        const head: ?*glib.List = self.as(gtk.Application).getWindows();
+        var item = head;
+        while (item) |v| : (item = v.f_next) {
+            if (v.f_data != null) windows += 1;
+        }
+        if (windows > 1) return;
+
+        priv.activation_grace = false;
+        if (priv.window_request_pending) return;
+        priv.window_request_pending = true;
+        _ = priv.core_app.mailbox.push(global.io(), .{
+            .new_window = .{},
+        }, .{ .forever = {} });
+    }
+
     fn dispose(self: *Self) callconv(.c) void {
         const priv = self.private();
+        if (priv.activation_grace_source) |v| {
+            if (glib.Source.remove(v) == 0) {
+                log.warn("unable to remove activation grace source", .{});
+            }
+            priv.activation_grace_source = null;
+        }
         if (priv.config_errors_dialog.get()) |diag| {
             diag.close();
             diag.unref(); // strong ref from get()
@@ -2691,19 +2893,20 @@ const Action = struct {
     }
 
     pub fn newWindow(self: *Application, parent: ?*CoreSurface, overrides: Overrides) !void {
+        const priv = self.private();
+        // A failed build must not leave the pending mark set, or no later
+        // activation could ever open a window again.
+        errdefer priv.window_request_pending = false;
         // Note that we've requested a window at least once. This is used
         // to trigger quit on no windows. Note I'm not sure if this is REALLY
         // necessary, but I don't want to risk a bug where on a slow machine
         // or something we quit immediately after starting up because there
         // was a delay in the event loop before we created a Window.
-        self.private().requested_window = true;
+        priv.requested_window = true;
 
         const win = Window.new(self, .{
             .title = overrides.title,
         });
-        // The window the activation asked for now exists; the next activation
-        // is answered by the window list rather than by the in-flight flag.
-        self.private().window_request_pending = false;
         initAndShowWindow(
             self,
             win,
@@ -2715,6 +2918,10 @@ const Action = struct {
                 .title = overrides.title,
             },
         );
+
+        // The window exists and is presented, so a forwarded activation now
+        // finds it and raises it instead of queueing another.
+        priv.window_request_pending = false;
     }
 
     fn initAndShowWindow(
@@ -2743,14 +2950,19 @@ const Action = struct {
         });
 
         // Estimate the initial window size before presenting so the window
-        // manager can position it correctly.
-        if (win.getActiveSurface()) |surface| {
-            surface.estimateInitialSize();
-            if (surface.getDefaultSize()) |size| {
-                win.as(gtk.Window).setDefaultSize(
-                    @intCast(size.width),
-                    @intCast(size.height),
-                );
+        // manager can position it correctly. A size recorded in the user's
+        // config wins over that estimate, and is applied here, before the
+        // window is presented: applied later, the window maps at the estimate
+        // and then resizes.
+        if (!win.applyRecordedWindowSize()) {
+            if (win.getActiveSurface()) |surface| {
+                surface.estimateInitialSize();
+                if (surface.getDefaultSize()) |size| {
+                    win.as(gtk.Window).setDefaultSize(
+                        @intCast(size.width),
+                        @intCast(size.height),
+                    );
+                }
             }
         }
 

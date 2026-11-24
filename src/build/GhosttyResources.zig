@@ -249,6 +249,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         b,
         cfg,
         &steps,
+        build_data_exe,
     );
 
     return .{ .steps = steps.items };
@@ -260,6 +261,7 @@ fn addLinuxAppResources(
     b: *std.Build,
     cfg: *const Config,
     steps: *std.ArrayList(*std.Build.Step),
+    build_data_exe: *std.Build.Step.Compile,
 ) !void {
     assert(cfg.target.result.os.tag == .linux);
 
@@ -403,9 +405,60 @@ fn addLinuxAppResources(
         "share/njuggle/dbus.service.default",
     ).step);
 
+    // The terminfo sentinel, in the place a user-prefix install can reach.
+    //
+    // src/os/resourcesdir.zig finds the resources directory by climbing from
+    // the binary and looking for share/terminfo/g/ghostty. That climb cannot
+    // see a user install: <prefix>/share/terminfo and <prefix>/bin are
+    // siblings of the data home, never ancestors of the binary. The desktop
+    // installer therefore also places this file under the data home, and
+    // resourcesdir.zig looks there by the same sentinel pair - which is what
+    // stops "no resources dir set, shell integration disabled" (and a
+    // terminal whose TERM the shell has no entry for) on installed copies.
+    //
+    // The sentinels are fixed names for the runtime's use, not the installed
+    // copy's share/ layout: that layout is upstream's and stays untouched for
+    // the none-mode parity gate.
+    // The terminfo sentinel, in the place a user-prefix install can reach.
+    //
+    // src/os/resourcesdir.zig finds the resources directory by climbing from
+    // the binary and looking for share/terminfo/g/ghostty. That climb cannot
+    // see a user install: <prefix>/share/terminfo and <prefix>/bin are
+    // siblings of the data home, never ancestors of the binary. The desktop
+    // installer therefore also places this file under the data home, and
+    // resourcesdir.zig looks there by the same sentinel pair - which is what
+    // stops "no resources dir set, shell integration disabled" (and a
+    // terminal whose TERM the shell has no entry for) on installed copies.
+    //
+    // The sentinels are fixed names for the runtime's use, not the installed
+    // copy's share/ layout: that layout is upstream's and stays untouched for
+    // the none-mode parity gate.
+    {
+        const sentinel_run = b.addRunArtifact(build_data_exe);
+        sentinel_run.addArg("+terminfo");
+        const sentinel_src = wf_sentinels: {
+            const files = b.addWriteFiles();
+            break :wf_sentinels files.addCopyFile(sentinel_run.captureStdOut(.{}), "ghostty");
+        };
+        inline for (.{ "g/ghostty", "x/xterm-ghostty" }) |sentinel_name| {
+            try steps.append(b.allocator, &b.addInstallFile(
+                sentinel_src,
+                b.pathJoin(&.{ "share", "site-terminfo", sentinel_name }),
+            ).step);
+        }
+    }
+
     // Njuggle's own artwork, at the hicolor sizes the desktop reads.
     // 32/64/128 are generated from the 512 master rather than shipped as
     // three hand-made files, so there is one source of truth for the mark.
+    //
+    // The divider's drag affordance (requirements, DRAG AFFORDANCE) is the
+    // app's one symbolic icon and rides along in the same theme under
+    // actions/, which is where symbolic chrome belongs. It is drawn from the
+    // icon theme, so the desktop installer's hicolor copy carries it too.
+    _ = affordance_marker: {
+        break :affordance_marker {};
+    };
     const hicolor = .{
         .{ "512", "512x512" },
         .{ "256", "256x256" },
@@ -413,6 +466,15 @@ fn addLinuxAppResources(
         .{ "64", "64x64" },
         .{ "32", "32x32" },
     };
+    // The divider's drag affordance (requirements, DRAG AFFORDANCE): the
+    // app's one symbolic icon, under actions/ where symbolic chrome belongs.
+    // It lives at the hicolor path the desktop installer copies wholesale, so
+    // the installed theme carries it and the runtime resolves it by name.
+    try steps.append(b.allocator, &b.addInstallFile(
+        b.path("images/njuggle/icons/hicolor/scalable/actions/njuggle-divider.svg"),
+        "share/icons/hicolor/scalable/actions/njuggle-divider.svg",
+    ).step);
+
     inline for (hicolor) |pair| {
         const size, const dir = pair;
         try steps.append(b.allocator, &b.addInstallFile(

@@ -467,6 +467,10 @@ pub fn build(b: *std.Build) !void {
         _ = try deps.add(test_exe);
 
         addGhosttyH(b, test_exe.root_module, config.baselineTarget(b.graph.io), .debug);
+        // window.zig's tests reach apprt/gtk/build/info.zig, which imports
+        // `app_id_options` unconditionally; without the edge the full test
+        // artifact does not compile.
+        buildpkg.GhosttyExe.addAppIdOptions(b, &config, test_exe.root_module);
 
         // Normal test running
         const test_run = b.addRunArtifact(test_exe);

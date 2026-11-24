@@ -1,0 +1,28 @@
+diff --git a/pkg/glslang/build.zig b/pkg/glslang/build.zig
+--- a/pkg/glslang/build.zig
++++ b/pkg/glslang/build.zig
+@@ -137,12 +137,23 @@ fn buildGlslang(
+                 "SPIRV/Logger.cpp",
+                 "SPIRV/SpvBuilder.cpp",
+                 "SPIRV/SpvPostProcess.cpp",
+-                "SPIRV/doc.cpp",
+                 "SPIRV/disassemble.cpp",
+                 "SPIRV/CInterface/spirv_c_interface.cpp",
+             },
+         });
+ 
++        // LOCAL PATCH (2026-10-29): Zig 0.17.0's bundled clang aborts
++        // (SIGABRT, no diagnostic) on SPIRV/doc.cpp at every optimization
++        // level above -O0. doc.cpp is a name-lookup table with no hot path,
++        // so -O0 costs nothing at runtime. Remove when Zig fixes the abort.
++        lib.root_module.addCSourceFiles(.{
++            .root = upstream.path(""),
++            .flags = &.{ "-fno-sanitize=undefined", "-fno-sanitize-trap=undefined", "-std=c++17", "-O0" },
++            .files = &.{
++                "SPIRV/doc.cpp",
++            },
++        });
++
+         if (target.result.os.tag != .windows) {
+             lib.root_module.addCSourceFiles(.{
+                 .root = upstream.path(""),

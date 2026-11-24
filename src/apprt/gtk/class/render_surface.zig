@@ -72,6 +72,11 @@ pub const RenderSurface = extern struct {
         /// One-shot so we log the first real allocation, not every size-allocate.
         scale_logged_size: bool = false,
 
+        /// Frames this widget has drawn since realization. A window whose
+        /// surface has drawn no frame yet is still starting up; the quit-path
+        /// close reads this before it tears the window down.
+        presented_frames: u32 = 0,
+
         pub var offset: c_int = 0;
     };
 
@@ -178,6 +183,9 @@ pub const RenderSurface = extern struct {
 
         const widget = self.as(gtk.Widget);
         if (widget.getWidth() == 0 or widget.getHeight() == 0) return;
+
+        // The surface has now displayed a frame. See `presentedFrames`.
+        priv.presented_frames += 1;
 
         // Map one texture texel to one device pixel. Widget CSS size would
         // stretch a fractionally scaled buffer. Snap the surface-relative
@@ -294,6 +302,12 @@ pub const RenderSurface = extern struct {
                 widget.getScaleFactor(),
             },
         );
+    }
+
+    /// Frames this widget has drawn since it was realized. A zero count means
+    /// the surface is still starting up: no present has reached the screen.
+    pub fn presentedFrames(self: *Self) u32 {
+        return self.private().presented_frames;
     }
 
     /// Set the core surface to pull presents from. Nothing will

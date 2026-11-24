@@ -28,7 +28,9 @@
 (def template (first args))
 
 (defn config-dir []
-  (string (or (os/getenv "XDG_CONFIG_HOME") (string (or (os/getenv "HOME") "") "/.config"))
+  (string (or (os/getenv "XDG_CONFIG_HOME")
+              (string (or (os/getenv "HOME") (error "HOME is not set and XDG_CONFIG_HOME is unset"))
+                      "/.config"))
           "/njuggle"))
 
 (defn file-exists? [path]

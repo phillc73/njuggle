@@ -68,21 +68,18 @@ gtk-sidebar-tabs = left
 # to get the default back.
 
 # The width of the sidebar in pixels. 0 (the default, and what you get with
-# no line here) means the sidebar's own width, a quarter of the window. A
-# non-zero value is the width in every window; dragging the sidebar's inner
-# edge, or the `sidebar_resize` keybinding, writes the width here, so the
-# width you set is the width you get back next launch. Floored at 100px, not
-# capped, and no effect in the collapsed (overlay) sidebar or with
-# gtk-sidebar-tabs = none.
-# gtk-sidebar-width = 0
-
-# The window size at its last close, written by Njuggle as WIDTHxHEIGHT.
-# Delete the line to get the default size back next launch.
-# window-size = 1000x700
+# no line here) means the sidebar's own width, a fraction of the window. A
+# non-zero value is the width in every window, clamped to 150px..half the
+# window on every resize. Dragging the sidebar's inner edge, or Ctrl+Shift+R,
+# changes the width and writes this one line back to this file, keeping every
+# other byte as you wrote it. Has no effect in the collapsed (overlay)
+# sidebar or with gtk-sidebar-tabs = none.
+# gtk-sidebar-width = 200
 
 # The per-tab status icon in the sidebar. true (the default, and what you get
 # with no line here) shows it on every row: grey idle, green while a command
-# runs, red when a tab needs attention (a command finished while you were in
+# runs, dim green while it runs long (past gtk-sidebar-status-long-after),
+# red when a tab needs attention (a command finished while you were in
 # another tab and ran longer than gtk-sidebar-status-after, or the tab rang
 # the bell). Set it to false to hide the icon. A split tab shows the strongest
 # state of any of its panes.
@@ -93,6 +90,12 @@ gtk-sidebar-tabs = left
 # Set it to 0 to mark every unfocused finish. Requires
 # gtk-sidebar-status-icon.
 # gtk-sidebar-status-after = 5s
+
+# How long a command may run before its icon dims to dim green. 60s by
+# default. The icon dims while the tab is focused too, stays dim until the
+# command resolves (red if you were away, grey if you were watching), and a
+# new command starts bright green again. Requires gtk-sidebar-status-icon.
+# gtk-sidebar-status-long-after = 60s
 
 # --- Look and feel ------------------------------------------------------
 #

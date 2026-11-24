@@ -3931,12 +3931,13 @@ else
 /// `0` (the default) means "use the sidebar's own width", which is a quarter
 /// of the window. A non-zero value is the starting width of the sidebar in
 /// every window. Dragging the sidebar's inner edge, or the
-/// `sidebar_resize` keybinding, writes the width here, so the width you set
-/// by hand is the width you get back next launch.
+/// `sidebar_resize` keybinding, writes the chosen width back to this key in
+/// your config file, so it survives a restart. The write touches that one
+/// key and its value only; every other line of the file is left as it was.
 ///
-/// The width is clamped to a minimum of 100 pixels: a narrower sidebar is
-/// unusable. It is NOT clamped to half the window - what is recorded is what
-/// is applied, and the window's own layout limits an over-wide sidebar.
+/// The width is clamped to a minimum of 150 pixels and to half the window:
+/// a sidebar narrower than 150 is unusable, and one wider than half the
+/// window has stopped being a sidebar.
 ///
 /// Has no effect in the collapsed (overlay) sidebar shown in narrow windows,
 /// and no effect when `gtk-sidebar-tabs = none`.
@@ -3944,11 +3945,24 @@ else
 /// Njuggle-only.
 @"gtk-sidebar-width": u16 = 0,
 
-/// The window's size at its last close, as `WIDTHxHEIGHT` in pixels.
+/// The size of the window, in pixels, as `WIDTHxHEIGHT` (for example
+/// `1200x800`).
 ///
-/// Njuggle writes this itself when a window closes, so the next launch opens
-/// at the size the last one was closed at. Empty (the default) means "no
-/// recorded size": the window opens at its own default.
+/// Njuggle writes this key when a window closes, and reads it at the next
+/// launch: the window opens at the size it was last closed at. It is the one
+/// piece of window geometry Njuggle remembers.
+///
+/// A window closed while maximized or fullscreen does not update this key:
+/// those are not the size you chose for the window, so the last windowed size
+/// is kept.
+///
+/// The key is a record, not a setting to maintain by hand. If the value does
+/// not parse as `WIDTHxHEIGHT` (for example `900`, `axb` or `0x640`), it is
+/// ignored: the window opens at its own default and the next close writes the
+/// key again. A malformed value never stops the configuration from loading.
+///
+/// The size is in logical pixels, so it round-trips unchanged on a display
+/// whose scale factor does not change.
 ///
 /// Njuggle-only.
 @"window-size": ?[:0]const u8 = null,
@@ -3987,6 +4001,25 @@ else
 ///
 /// Njuggle-only.
 @"gtk-sidebar-status-after": Duration = .{ .duration = 5 * std.time.ns_per_s },
+
+/// How long a command may run before its tab's status icon dims, in the
+/// duration syntax of `gtk-sidebar-status-after` (`60s`, `5m`).
+///
+/// A command that never exits must stop reading as "busy": past this, the
+/// green icon turns dim green, and it stays dim until the command resolves.
+/// It dims while the tab is focused too - a long build in the tab you are
+/// looking at is still long. A finished command resolves the icon to red
+/// (unfocused, past `gtk-sidebar-status-after`) or grey (focused); a bell
+/// turns it red while the command runs. A new command in the same pane
+/// starts bright green again and restarts this clock.
+///
+/// The threshold is passed, not reached: the icon dims just past the value,
+/// so `60s` means dim from 60s and one tick onwards.
+///
+/// Requires `gtk-sidebar-status-icon`.
+///
+/// Njuggle-only.
+@"gtk-sidebar-status-long-after": Duration = .{ .duration = 60 * std.time.ns_per_s },
 
 /// If `true` (default), then the Ghostty GTK tabs will be "wide." Wide tabs
 /// are the new typical Gnome style where tabs fill their available space.
@@ -11541,6 +11574,64 @@ test "gtk-sidebar-active-tab-border: absent by default" {
     defer cfg.deinit();
     try cfg.finalize();
     try testing.expectEqual(null, cfg.@"gtk-sidebar-active-tab-border");
+}
+
+test "gtk-sidebar-status-long-after: default, unit, and zero" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+
+    {
+        var cfg = try Config.default(alloc);
+        defer cfg.deinit();
+        var it: TestIterator = .{ .data = &.{} };
+        try cfg.loadIter(alloc, &it);
+        try cfg.finalize();
+
+        // Default-on: no line in the file, 60 seconds.
+        try testing.expectEqual(
+            @as(u64, 60 * std.time.ns_per_s),
+            cfg.@"gtk-sidebar-status-long-after".duration,
+        );
+    }
+
+    {
+        var cfg = try Config.default(alloc);
+        defer cfg.deinit();
+        var it: TestIterator = .{ .data = &.{
+            "--gtk-sidebar-status-long-after=90s",
+        } };
+        try cfg.loadIter(alloc, &it);
+        try cfg.finalize();
+
+        try testing.expectEqual(
+            @as(u64, 90 * std.time.ns_per_s),
+            cfg.@"gtk-sidebar-status-long-after".duration,
+        );
+    }
+
+    // The unit is mandatory: a bare number does not parse as a duration.
+    // (loadIter records parse errors for the config-error report instead of
+    // returning them, so the parse is asserted directly.)
+    try testing.expectError(
+        error.InvalidValue,
+        Duration.parseCLI("90"),
+    );
+
+    // Zero is legal and means "past start": the tracker's strict boundary
+    // promotes on the first check.
+    {
+        var cfg = try Config.default(alloc);
+        defer cfg.deinit();
+        var it: TestIterator = .{ .data = &.{
+            "--gtk-sidebar-status-long-after=0s",
+        } };
+        try cfg.loadIter(alloc, &it);
+        try cfg.finalize();
+        try testing.expectEqual(
+            @as(u64, 0),
+            cfg.@"gtk-sidebar-status-long-after".duration,
+        );
+    }
 }
 
 test "gtk-sidebar-active-tab-border: hex value parses" {

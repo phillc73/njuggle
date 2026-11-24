@@ -36,4 +36,3 @@ else
 /// True when this build asked for a non-default identity. Debug-mode extras
 /// keyed to "is this a dev build" should read this, not `builtin.mode`.
 pub const is_dev_identity = suffix.len != 0;
-

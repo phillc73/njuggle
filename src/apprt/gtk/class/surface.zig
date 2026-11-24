@@ -97,7 +97,7 @@ pub const Surface = extern struct {
         /// An int rather than the tab_status enum: the property then needs no
         /// registered GEnum, and the numeric order is the dominance order,
         /// which is what makes "red outranks green" a plain comparison.
-        pub const @"status" = struct {
+        pub const status = struct {
             pub const name = "status";
             const impl = gobject.ext.defineProperty(
                 name,
@@ -725,15 +725,24 @@ pub const Surface = extern struct {
         /// rows are recycled and this state belongs to the SURFACE.
         status_tracker: tab_status.Tracker = .{},
 
-        /// When the running command started, for the finish threshold. The
-        /// core keeps its own timer for `notify-on-command-finish`; this one
-        /// is separate so a change to one feature cannot silently move the
-        /// other's threshold.
+        /// When the running command started. The clock for both status
+        /// thresholds: the finish path reads it against
+        /// `gtk-sidebar-status-after`, the long-runner timer against
+        /// `gtk-sidebar-status-long-after`. The core keeps its own timer for
+        /// `notify-on-command-finish`; this one is separate so a change to
+        /// one feature cannot silently move the other's threshold.
         status_command_start: ?std.Io.Timestamp = null,
+
+        /// The long-runner timer: armed at command start, fires once past
+        /// `gtk-sidebar-status-long-after`, then leaves the dim state to
+        /// stand until the command resolves. A command that never exits
+        /// emits nothing to render, so a check at paint time could not fire -
+        /// the timer is what catches it.
+        status_long_timer: ?c_uint = null,
 
         /// The status property's backing store. c_int because the GObject
         /// property is an int; the int is `tab_status.State`'s tag.
-        status_state: c_int = @intFromEnum(tab_status.State.idle),
+        status_state: c_int = @backingInt(tab_status.State.idle),
 
         /// Last attention value pushed to the "status-attention" property.
         /// The property exists so the sidebar row can set a tooltip without
@@ -1978,6 +1987,15 @@ pub const Surface = extern struct {
 
         self.clearDesktopNotifications();
 
+        // The long-run status timer outlives a surface unless it is taken
+        // down here. It is a toolkit source holding this widget as userdata,
+        // so a fire after dispose runs the callback against a surface whose
+        // config and children are gone and whose memory is only kept alive
+        // by the source. The command paths cancel it when a command resolves;
+        // a surface that closes mid-command never reaches them.
+        self.statusLongTimerCancel();
+        priv.status_command_start = null;
+
         if (priv.config) |v| {
             v.unref();
             priv.config = null;
@@ -2234,6 +2252,19 @@ pub const Surface = extern struct {
     /// Returns true if the GLArea of this surface is mapped.
     pub fn getMapped(self: *Self) bool {
         return self.private().mapped;
+    }
+
+    /// Frames the render widget has drawn. Zero until the first present has
+    /// reached the screen; the quit-path close reads it to tell a startup
+    /// window from a settled one.
+    pub fn presentedFrames(self: *Self) u32 {
+        return self.private().render_surface.presentedFrames();
+    }
+
+    /// Whether this surface's child process has exited. The settle wait reads
+    /// it to recognize a pane that will draw no further frame (DB3 round 3).
+    pub fn childExitedFlag(self: *Self) bool {
+        return self.private().child_exited;
     }
 
     /// Change the configuration for this surface.
@@ -2738,9 +2769,62 @@ pub const Surface = extern struct {
     /// surface's `start_command` message, not tracked from the stream here.
     pub fn statusCommandStarted(self: *Self) void {
         const priv = self.private();
+        // A second command restarts the clock AND the timer: the dim state
+        // belongs to the command that ran long, not to the pane.
+        self.statusLongTimerCancel();
         priv.status_tracker.commandStarted();
         priv.status_command_start = .now(global.io(), .awake);
+        self.statusLongTimerArm();
         self.statusChanged();
+    }
+
+    /// The long threshold, in milliseconds, for the GTK timer. Zero means
+    /// "promote on the first tick past start", which the tracker's strictly
+    /// past boundary turns into the first timer fire.
+    fn statusLongMs(self: *Self) u32 {
+        const cfg = self.private().config orelse return 0;
+        const ns = cfg.get().@"gtk-sidebar-status-long-after".duration;
+        const ms = ns / std.time.ns_per_ms;
+        return @intCast(ms + @intFromBool(ns % std.time.ns_per_ms != 0));
+    }
+
+    /// Arm the one timer this pane owns for its running command. It fires a
+    /// millisecond past the threshold, the first wall-clock instant that is
+    /// strictly past it, and calls the tracker's pure elapsed decision with
+    /// the real elapsed time.
+    fn statusLongTimerArm(self: *Self) void {
+        const priv = self.private();
+        // A threshold of a day is the practical ceiling; anything above it
+        // is a config value that no command outlives.
+        const ms = @min(statusLongMs(self), 86_400_000);
+        priv.status_long_timer = glib.timeoutAdd(ms + 1, statusLongTimerFired, self);
+    }
+
+    fn statusLongTimerCancel(self: *Self) void {
+        const priv = self.private();
+        const timer = priv.status_long_timer orelse return;
+        priv.status_long_timer = null;
+        _ = glib.Source.remove(timer);
+    }
+
+    fn statusLongTimerFired(ud: ?*anyopaque) callconv(.c) c_int {
+        const self: *Self = @ptrCast(@alignCast(ud orelse return 0));
+        const priv = self.private();
+        priv.status_long_timer = null;
+
+        const start = priv.status_command_start orelse return 0;
+        const elapsed = start.untilNow(global.io(), .awake);
+        const long_ns = if (priv.config) |c|
+            c.get().@"gtk-sidebar-status-long-after".duration
+        else
+            0;
+        const elapsed_ns: u64 = if (elapsed.nanoseconds > 0)
+            @intCast(elapsed.nanoseconds)
+        else
+            0;
+        priv.status_tracker.commandElapsed(elapsed_ns, long_ns);
+        self.statusChanged();
+        return 0;
     }
 
     /// A command finished in this pane. The duration comes from the core
@@ -2757,6 +2841,10 @@ pub const Surface = extern struct {
         // Focus is read at finish time: a command that started while the tab
         // was in the background and is still running when the user switches
         // to it ends in front of the user, and is not news.
+        // The finish path is also where a command resolves. The bell can
+        // arrive while it still runs, so this path never reads the dim state
+        // as something to keep.
+        self.statusLongTimerCancel();
         priv.status_tracker.commandFinished(
             self.getFocused(),
             value.duration.duration,
@@ -2777,8 +2865,8 @@ pub const Surface = extern struct {
 
     fn statusChanged(self: *Self) void {
         const priv = self.private();
-        priv.status_state = @intFromEnum(priv.status_tracker.state());
-        self.as(gobject.Object).notifyByPspec(properties.@"status".impl.param_spec);
+        priv.status_state = @backingInt(priv.status_tracker.state());
+        self.as(gobject.Object).notifyByPspec(properties.status.impl.param_spec);
 
         const attention = priv.status_tracker.attention;
         if (attention != priv.status_attention) {
@@ -4166,7 +4254,7 @@ pub const Surface = extern struct {
                 properties.@"key-sequence".impl,
                 properties.@"key-table".impl,
                 properties.@"min-size".impl,
-                properties.@"status".impl,
+                properties.status.impl,
                 properties.@"status-attention".impl,
                 properties.@"mouse-shape".impl,
                 properties.@"mouse-hidden".impl,

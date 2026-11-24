@@ -15,6 +15,7 @@ pub fn colour(state: tab_status.State) []const u8 {
     return switch (state) {
         .idle => "grey",
         .running => "green",
+        .long_running => "green-dim",
         .needs_attention => "red",
     };
 }
@@ -149,7 +150,6 @@ fn paeth(a: u8, b: u8, c: u8) u8 {
     return c;
 }
 
-
 /// What an icon says about itself, measured rather than named. The owner's
 /// artwork is one horse mark recoloured per state, so the colour is read from
 /// which channel a large area of the image is made of, not from the filename
@@ -158,6 +158,10 @@ pub const Fingerprint = struct {
     /// Pixels of a mostly-neutral colour that is not near black (the mark's
     /// linework, and the whole idle image).
     neutral: u32 = 0,
+    /// Near-dark pixels. The idle mark is drawn on a near-black fill, and the
+    /// dim green set is darker than the bright set, so the two are told
+    /// apart by how much of the mark sits above the near-black floor.
+    dark_green: u32 = 0,
     /// Pixels saturated enough to carry a state colour, per dominant channel.
     red: u32 = 0,
     green: u32 = 0,
@@ -165,7 +169,8 @@ pub const Fingerprint = struct {
 };
 
 /// Saturated means max-min above this: the owner's red is (237,28,36), the
-/// green (5,222,78), both far past it; linework and shading are within it.
+/// bright green (55,247,70) and the dim green (74,116,75), all far past it;
+/// linework and shading are within it.
 const saturated_spread: u8 = 80;
 /// "Not near black": the images carry a dark outline, and a near-black pixel
 /// is neither linework nor colour.
@@ -180,7 +185,14 @@ pub fn fingerprint(p: Pixels) Fingerprint {
         const g = p.rgb[i + 1];
         const b = p.rgb[i + 2];
         const max = @max(r, @max(g, b));
-        if (max <= near_black) continue;
+        if (max <= near_black) {
+            // A near-black pixel whose largest channel is still green belongs
+            // to the dim green set's ground (74, 116, 75 is not near black
+            // once shaded, but its edge pixels are); the neutral linework is
+            // grey and never qualifies.
+            if (g > r and g > b) f.dark_green += 1;
+            continue;
+        }
         const spread = max - @min(r, @min(g, b));
 
         if (spread > saturated_spread) {
@@ -206,10 +218,14 @@ pub fn fingerprint(p: Pixels) Fingerprint {
 /// A state colour must hold at least one percent of the image: every pixel is
 /// one classification or another, and the mark is a thin line drawing.
 pub fn stateOf(f: Fingerprint) ?tab_status.State {
-    const total: u64 = @as(u64, f.neutral) + f.red + f.green + f.blue;
+    const total: u64 = @as(u64, f.neutral) + f.red + f.green + f.blue + f.dark_green;
     const floor = total / 100;
 
     if (f.red > floor and f.red > f.green and f.red > f.blue) return .needs_attention;
+    // The count that keeps dim green apart from bright green is the
+    // dark-green one: the bright mark has almost none, the dim mark most of
+    // its run colour.
+    if (f.dark_green > floor and f.dark_green > f.green) return .long_running;
     if (f.green > floor and f.green > f.red and f.green > f.blue) return .running;
     // Blue is the idle mark as shipped (the neutral set is drawn in a blue
     // that is near-grey to the eye but not on the channels).
@@ -226,6 +242,7 @@ const testing = std.testing;
 test "colour: the state to colour mapping, named once" {
     try testing.expectEqualStrings("grey", colour(.idle));
     try testing.expectEqualStrings("green", colour(.running));
+    try testing.expectEqualStrings("green-dim", colour(.long_running));
     try testing.expectEqualStrings("red", colour(.needs_attention));
 }
 
@@ -263,7 +280,7 @@ fn statusIconBytes(alloc: std.mem.Allocator, path: []const u8) ![]u8 {
 
 test "artwork: each icon decodes to its own state's colour" {
     const alloc = testing.allocator;
-    inline for ([_]tab_status.State{ .running, .needs_attention, .idle }) |state| {
+    inline for ([_]tab_status.State{ .running, .long_running, .needs_attention, .idle }) |state| {
         const path = try statusIconPath(alloc, colour(state));
         defer alloc.free(path);
         const bytes = try statusIconBytes(alloc, path);
@@ -292,10 +309,10 @@ test "artwork: the idle image is the mark's neutral rendering" {
     try testing.expectEqual(@as(u32, 0), f.blue);
 }
 
-test "artwork: the three images are different, so a swapped index is visible" {
+test "artwork: the four images are different, so a swapped index is visible" {
     const alloc = testing.allocator;
-    var prints: [3]Fingerprint = undefined;
-    inline for ([_]tab_status.State{ .running, .needs_attention, .idle }, 0..) |state, i| {
+    var prints: [4]Fingerprint = undefined;
+    inline for ([_]tab_status.State{ .running, .long_running, .needs_attention, .idle }, 0..) |state, i| {
         const path = try statusIconPath(alloc, colour(state));
         defer alloc.free(path);
         const bytes = try statusIconBytes(alloc, path);
@@ -304,10 +321,13 @@ test "artwork: the three images are different, so a swapped index is visible" {
         defer alloc.free(pixels.rgb);
         prints[i] = fingerprint(pixels);
     }
-    // Every pair differs in where its colour sits.
+    // Every pair differs in where its colour sits: bright green vs dim green
+    // in saturated vs dark green, dim green vs red in which colour leads, and
+    // either green vs grey in how much neutral the mark carries.
     try testing.expect(prints[0].green != prints[1].green);
-    try testing.expect(prints[1].red != prints[0].red);
-    try testing.expect(prints[2].neutral != prints[0].neutral);
+    try testing.expect(prints[1].dark_green > prints[0].dark_green);
+    try testing.expect(prints[2].red != prints[1].red);
+    try testing.expect(prints[3].neutral != prints[0].neutral);
 }
 
 test "fingerprint: a red-dominant pixel counts red, its reverse counts green" {

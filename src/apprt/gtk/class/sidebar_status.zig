@@ -13,10 +13,10 @@ const std = @import("std");
 const tab_status = @import("tab_status.zig");
 const status_icon = @import("status_icon.zig");
 
-/// The three state images in texture-list order. Green, red, grey: the index
-/// `syncStatus` shows for a state is taken from this list by search, so the
-/// order is free to change and the colours follow.
-pub const status_states = [_]tab_status.State{ .running, .needs_attention, .idle };
+/// The state images in texture-list order. Green, dim green, red, grey: the
+/// index `syncStatus` shows for a state is taken from this list by search, so
+/// the order is free to change and the colours follow.
+pub const status_states = [_]tab_status.State{ .running, .long_running, .needs_attention, .idle };
 
 /// The icons a row loads once and shows by state.
 pub const StatusIcons = struct {
@@ -61,6 +61,7 @@ pub fn Kit(comptime kit: anytype) type {
             kit.show(self.image, icons.images[status_icon.textureIndex(&status_states, state)]);
             kit.tooltip(self.image, switch (state) {
                 .needs_attention => "Command finished while you were away\x00",
+                .long_running => "Command running for a while\x00",
                 else => null,
             });
             return true;
@@ -150,10 +151,11 @@ fn destroy(h: anytype) void {
     std.testing.allocator.destroy(h.image);
 }
 
-test "status_states: green, red, grey, and the index follows the list" {
+test "status_states: green, dim green, red, grey, index follows the list" {
     try testing.expectEqual(St.running, status_states[0]);
-    try testing.expectEqual(St.needs_attention, status_states[1]);
-    try testing.expectEqual(St.idle, status_states[2]);
+    try testing.expectEqual(St.long_running, status_states[1]);
+    try testing.expectEqual(St.needs_attention, status_states[2]);
+    try testing.expectEqual(St.idle, status_states[3]);
     for (status_states) |state| {
         try testing.expectEqual(state, status_states[status_icon.textureIndex(&status_states, state)]);
     }
@@ -201,7 +203,7 @@ test "sync: the colours on screen are the ones the artwork carries" {
     // The list order and the artwork agree: whatever index the row uses for a
     // state, the image at that index is the image whose colours say so.
     const si = status_icon;
-    inline for ([_]St{ .running, .needs_attention, .idle }) |state| {
+    inline for ([_]St{ .running, .long_running, .needs_attention, .idle }) |state| {
         const idx = si.textureIndex(&status_states, state);
         try testing.expectEqualStrings(si.colour(state), si.colour(status_states[idx]));
     }
