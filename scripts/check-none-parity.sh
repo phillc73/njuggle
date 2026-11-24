@@ -70,7 +70,7 @@ noise() {
     # filtered together or the pair silently reappears as a false parity
     # break the next time the wording shifts by a line.
     grep -iE 'CRITICAL|WARNING|assertion' "$1" 2>/dev/null |
-        grep -viE 'debug build|rebuild in a release mode|performance will be|GDK_DEBUG|GDK_DISABLE|hsl\(' |
+        grep -viE 'debug build|rebuild in a release mode|performance will be|GDK_DEBUG|GDK_DISABLE|hsl\(|no resources dir|shell integration disabled' |
         sed 's/0x[0-9a-f]*//g' |
         sort -u || true
 }
