@@ -54,6 +54,13 @@ tab mixes panes. The icon stays dim until the command resolves - red if
 it finished while you were in another tab, grey if you were watching -
 and a bell turns it red while the command is still running.
 
+<div align="center"><img src="sidebar.png" alt="The Njuggle sidebar: tabs grouped by repository, the status marks, and the border on the active tab" width="214"></div>
+
+*The sidebar: tabs grouped by repository, the status marks - a bell and
+red for a tab that rang and finished needing attention, dim green for a
+long-running command, bright green for busy, grey for idle - and the
+border on the active tab (colour configurable).*
+
 ## Configuration: Njuggle's own settings
 
 **These options are Njuggle's own. None of them exist in Ghostty.**
