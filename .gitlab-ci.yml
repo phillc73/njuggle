@@ -99,7 +99,6 @@ build-binary:
   artifacts:
     paths:
       - package/
-      - zig-out/bin/njuggle
     expire_in: 1 week
 
 # Fast gate 2: the none-mode parity gate, invoked exactly as shipped, from a
