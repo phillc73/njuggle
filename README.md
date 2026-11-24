@@ -1,4 +1,4 @@
-<p align="center"><img src="hero.png" alt="Njuggle" width="400"></p>
+<div align="center"><img src="hero.png" alt="Njuggle" width="400"></div>
 
 ## What is Njuggle?
 
