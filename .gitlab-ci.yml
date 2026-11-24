@@ -35,7 +35,7 @@ default:
       libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
       libxml2-utils pkg-config xz-utils
       libegl1 libgl1 libgl1-mesa-dri libglx-mesa0
-      meson ninja-build python3 xvfb xauth fonts-dejavu-core
+      meson ninja-build python3 python3-gi xvfb xauth fonts-dejavu-core
     - ./ci/install-zig.sh
     - ./ci/install-blueprint.sh
     - export PATH="$CI_PROJECT_DIR/.ci-tools/zig:$PATH"
