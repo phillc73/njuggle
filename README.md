@@ -36,7 +36,7 @@ The bugs in this application are all his fault.
 
 ## Status icons
 
-<img src="sidebar.png" alt="The Njuggle sidebar: tabs grouped by repository, the status marks, and the border on the active tab" align="left" width="112">
+<div align="left"><img src="sidebar.png" alt="The Njuggle sidebar: tabs grouped by repository, the status marks, and the border on the active tab" width="107"></div>
 
 Each tab has its own Njuggle status icon, which is grey by default.
 When a process is running in a tab, this icon changes to green. If
@@ -55,8 +55,6 @@ looking at the tab or not. Dim green outranks bright green when a split
 tab mixes panes. The icon stays dim until the command resolves - red if
 it finished while you were in another tab, grey if you were watching -
 and a bell turns it red while the command is still running.
-
-<br clear="all">
 
 ## Configuration: Njuggle's own settings
 
