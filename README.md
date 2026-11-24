@@ -36,9 +36,27 @@ The bugs in this application are all his fault.
 
 ## Status icons
 
-| | |
-|---|---|
-| <img src="sidebar.png" alt="The Njuggle sidebar: tabs grouped by repository, the status marks, and the border on the active tab" width="214"> | Each tab has its own Njuggle status icon, which is grey by default. When a process is running in a tab, this icon changes to green. If you switch to a different tab while the status icon is green, it will then change to red when the long running process is complete. In this way, you can easily see which tabs have active processes and which need your attention. A notification bell will also turn the icon red, because some things need your attention without a process running at all. Once you've looked at the tab with the red icon, it returns to grey. A command that has been running for a while stops reading as "busy" and starts reading as "long": past `gtk-sidebar-status-long-after` (60 seconds by default) the icon turns dim green, and it dims whether you are looking at the tab or not. Dim green outranks bright green when a split tab mixes panes. The icon stays dim until the command resolves - red if it finished while you were in another tab, grey if you were watching - and a bell turns it red while the command is still running. |
+<img src="sidebar.png" alt="The Njuggle sidebar: tabs grouped by repository, the status marks, and the border on the active tab" align="left" width="112">
+
+Each tab has its own Njuggle status icon, which is grey by default.
+When a process is running in a tab, this icon changes to green. If
+you switch to a different tab while the status icon is green, it will
+then change to red when the long running process is complete. In this
+way, you can easily see which tabs have active processes and which
+need your attention. A notification bell will also turn the icon red,
+because some things need your attention without a process running at
+all. Once you've looked at the tab with the red icon, it returns to
+grey.
+
+A command that has been running for a while stops reading as "busy" and
+starts reading as "long": past `gtk-sidebar-status-long-after` (60
+seconds by default) the icon turns dim green, and it dims whether you are
+looking at the tab or not. Dim green outranks bright green when a split
+tab mixes panes. The icon stays dim until the command resolves - red if
+it finished while you were in another tab, grey if you were watching -
+and a bell turns it red while the command is still running.
+
+<br clear="all">
 
 ## Configuration: Njuggle's own settings
 
