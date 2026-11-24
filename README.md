@@ -36,7 +36,7 @@ The bugs in this application are all his fault.
 
 ## Status icons
 
-<img src="sidebar.png" alt="The Njuggle sidebar: tabs grouped by repository, the status marks, and the border on the active tab" align="left" width="214">
+<img src="sidebar.png" alt="The Njuggle sidebar: tabs grouped by repository, the status marks, and the border on the active tab" align="left" width="107" hspace="10">
 
 Each tab has its own Njuggle status icon, which is grey by default.
 When a process is running in a tab, this icon changes to green. If
